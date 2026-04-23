@@ -14,9 +14,79 @@ This directory contains the OpenTofu + Terragrunt implementation for the washing
 - `environments/prod/*` - Terragrunt units and dependency graph
 - `modules/*` - reusable Terraform modules
 
-## Before first apply
+## IAM user setup
 
-0. Create an IAM user with `AdministratorAccess` IAM policy attached, create security credentials and add them as a profile to your local AWS CLI. This setup will **not** work using the root IAM user!
+Create an IAM user with `AdministratorAccess` IAM policy attached, create security credentials and add them as a profile to your local AWS CLI. This setup will **not** work using the root IAM user!
+
+Create the IAM user:
+
+```shell
+# assuming you have a working AWS cli with root access
+
+# create the IAM user
+aws iam create-user --user-name terraform
+
+# create the force MFA IAM policy
+aws iam create-policy --policy-name ForceMFA --policy-document file://misc/force-mfa-policy.json
+
+# attach policies
+aws iam attach-user-policy --user-name test --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/ForceMFA"
+aws iam attach-user-policy --user-name test --policy-arn "arn:aws:iam::aws:policy/AdministratorAccess"
+
+# NOTE DOWN THE ACCESS KEY ID AND SECRET ACCESS KEY!
+aws iam create-access-key --user-name terraform
+```
+
+Now create an MFA device for the user:
+
+```shell
+aws iam create-virtual-mfa-device --virtual-mfa-device-name terraform-personal-mfa-device --bootstrap-method QRCodePNG --outfile activation.png
+```
+
+Scan the QR code in `activation.png` using your favorite MFA app.
+
+Finally, activate the MFA device and associate it with the user. You will need to enter two consecutive MFA codes:
+
+```shell
+read -s CODE1
+# type in code 1
+read -s CODE2
+# type in code 2
+aws iam enable-mfa-device \
+  --user-name terraform \
+  --serial-number "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):mfa/terraform-personal-mfa-device" \
+  --authentication-code1 "$CODE1" \
+  --authentication-code2 "$CODE2"
+```
+
+You can now add the user to you AWS CLI:
+
+```shell
+echo "
+[profile terraform]
+aws_access_key_id = <ACCESS_KEY_ID>
+aws_secret_access_key = <SECRET_ACCESS_KEY>
+mfa_serial = arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):mfa/terraform-personal-mfa-device
+" | tee -a "$HOME/.aws/config"
+```
+
+Try to do some action using the new user. The second command should give you access denied:
+
+```shell
+AWS_PROFILE=terraform aws sts get-caller-identity
+AWS_PROFILE=terraform aws s3 ls
+```
+
+Now enter a generated MFA token and retry, the command should now work:
+
+```shell
+AWS_PROFILE=terraform aws configure mfa-login
+
+# this should now work
+AWS_PROFILE=terraform aws s3 ls
+```
+
+## Before first apply
 
 1. Export required environment variables:
 
