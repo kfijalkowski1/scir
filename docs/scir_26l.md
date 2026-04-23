@@ -52,7 +52,7 @@ Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz 
 ---
 config:
   layout: elk
-  theme: neutral
+  <!-- theme: neutral -->
 ---
 flowchart TD
     subgraph WLAN [Sieć WLAN]
@@ -109,7 +109,7 @@ flowchart TD
 ---
 config:
   layout: elk
-  theme: neutral
+  <!-- theme: neutral -->
 ---
 sequenceDiagram
     participant Plug as Smart Plug (Gniazdko)
