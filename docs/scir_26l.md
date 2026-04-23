@@ -24,13 +24,13 @@ Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz 
 # Wybrane czujniki
 
 - Seeed Xiao ESP32-S3 \- WiFi/Bluetooth \- Seeedstudio 113991114  
-  - Gniazdko ma możliwość pracy jako publisher MQTT  
 - Moduł z buzzerem aktywnym z generatorem \- SENV0005  
 - Tact Switch 12x12mm \- przyciski kolorowe \- 4szt. \- SparkFun PRT-14460  
 - Zestaw płytka stykowa 830 \+ przewody \+ moduł zasilający  
 - Zestaw rezystorów CF THT 1/4W opisany \- 160szt.  
 - Zasilacz impulsowy 5V/3A 15W \- wtyk DC 5,5/2,1mm  
 - Shelly Plug S Gen3 \- inteligentne gniazdko WiFi/Bluetooth/Matter z pomiarem energii \- białe
+  - Gniazdko ma możliwość pracy jako publisher MQTT  
 
 # Architektura rozwiązania
 
