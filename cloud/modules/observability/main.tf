@@ -53,7 +53,7 @@ resource "aws_cloudwatch_dashboard" "this" {
         properties = {
           title  = "Recent Telemetry and Events"
           region = var.aws_region
-          query  = "SOURCE '${var.processor_log_group_name}' | fields @timestamp, @message | sort @timestamp desc | limit 100"
+          query  = "SOURCE '${var.processor_log_group_name}', '${var.webhook_log_group_name}' | fields @timestamp, @message, @log | sort @timestamp desc | limit 100"
           view   = "table"
         }
       },

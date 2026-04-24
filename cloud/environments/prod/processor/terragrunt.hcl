@@ -31,7 +31,6 @@ dependency "messaging" {
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "output"]
   mock_outputs = {
     telemetry_queue_arn = "arn:aws:sqs:eu-central-1:111111111111:scir-prod-washer-telemetry"
-    telemetry_queue_url = "https://sqs.eu-central-1.amazonaws.com/111111111111/scir-prod-washer-telemetry"
     control_topic       = "scir/prod/washer/buzzer/events"
   }
 }
@@ -48,7 +47,6 @@ dependency "iot" {
 
 inputs = {
   telemetry_queue_arn            = dependency.messaging.outputs.telemetry_queue_arn
-  telemetry_queue_url            = dependency.messaging.outputs.telemetry_queue_url
   control_topic                  = dependency.messaging.outputs.control_topic
   iot_data_endpoint              = dependency.iot.outputs.iot_data_endpoint
   timestream_database_name       = dependency.data.outputs.timestream_database_name

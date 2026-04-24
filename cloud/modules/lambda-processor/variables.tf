@@ -25,11 +25,6 @@ variable "telemetry_queue_arn" {
   type        = string
 }
 
-variable "telemetry_queue_url" {
-  description = "SQS queue URL"
-  type        = string
-}
-
 variable "timestream_database_name" {
   description = "Timestream database name"
   type        = string

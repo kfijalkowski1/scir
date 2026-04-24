@@ -14,12 +14,6 @@ variable "prefix" {
   default     = "scir-"
 }
 
-variable "common_tags" {
-  description = "Common tags applied to resources"
-  type        = map(string)
-  default     = {}
-}
-
 variable "processor_lambda_name" {
   description = "Processor Lambda name"
   type        = string
