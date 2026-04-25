@@ -49,4 +49,8 @@ inputs = {
   webhook_lambda_name      = dependency.webhook.outputs.lambda_function_name
   webhook_log_group_name   = dependency.webhook.outputs.lambda_cloudwatch_log_group_name
   telemetry_queue_name     = dependency.messaging.outputs.telemetry_queue_name
+  metrics_namespace        = include.root.locals.metrics_namespace
+  readings_metric_name     = include.root.locals.readings_metric_name
+  events_metric_name       = include.root.locals.events_metric_name
+  device_id                = include.root.locals.device_id
 }

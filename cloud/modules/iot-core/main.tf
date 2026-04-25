@@ -14,7 +14,6 @@ locals {
   shelly_topic         = var.shelly_publish_topic != "" ? var.shelly_publish_topic : local.shelly_topic_default
 
   telemetry_rule_name = replace("${local.name_prefix}telemetry_to_sqs", "-", "_")
-  events_rule_name    = replace("${local.name_prefix}control_to_timestream", "-", "_")
 }
 
 resource "aws_iot_thing" "shelly" {
@@ -50,7 +49,7 @@ resource "aws_iot_policy" "shelly" {
       {
         Effect   = "Allow"
         Action   = ["iot:Connect"]
-        Resource = "arn:aws:iot:${var.aws_region}:${data.aws_caller_identity.current.account_id}:client/${aws_iot_thing.shelly.name}"
+        Resource = "arn:aws:iot:${var.aws_region}:${data.aws_caller_identity.current.account_id}:client/$${iot:Connection.Thing.ThingName}"
       },
       {
         Effect   = "Allow"
@@ -72,7 +71,7 @@ resource "aws_iot_policy" "esp" {
       {
         Effect   = "Allow"
         Action   = ["iot:Connect"]
-        Resource = "arn:aws:iot:${var.aws_region}:${data.aws_caller_identity.current.account_id}:client/${aws_iot_thing.esp.name}"
+        Resource = "arn:aws:iot:${var.aws_region}:${data.aws_caller_identity.current.account_id}:client/$${iot:Connection.Thing.ThingName}"
       },
       {
         Effect   = "Allow"
@@ -161,80 +160,6 @@ resource "aws_iot_topic_rule" "telemetry_to_sqs" {
     queue_url  = var.telemetry_queue_url
     role_arn   = aws_iam_role.telemetry_rule.arn
     use_base64 = false
-  }
-
-  tags = local.tags
-}
-
-resource "aws_iam_role" "events_rule" {
-  name = "${local.name_prefix}iot-events-rule"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "iot.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-
-  tags = local.tags
-}
-
-resource "aws_iam_role_policy" "events_rule" {
-  name = "${local.name_prefix}iot-events-rule"
-  role = aws_iam_role.events_rule.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "timestream:WriteRecords",
-          "timestream:DescribeEndpoints"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-resource "aws_iot_topic_rule" "control_to_timestream" {
-  name        = local.events_rule_name
-  description = "Persist buzzer and silence events from control topic"
-  enabled     = true
-  sql         = "SELECT event_type, source, device_id, ts AS event_ts, 1 AS event_value FROM '${var.control_topic}'"
-  sql_version = "2016-03-23"
-
-  timestream {
-    role_arn      = aws_iam_role.events_rule.arn
-    database_name = var.timestream_database_name
-    table_name    = var.timestream_events_table_name
-
-    dimension {
-      name  = "event_type"
-      value = "$${event_type}"
-    }
-
-    dimension {
-      name  = "source"
-      value = "$${source}"
-    }
-
-    dimension {
-      name  = "device_id"
-      value = "$${device_id}"
-    }
-
-    timestamp {
-      unit  = "MILLISECONDS"
-      value = "$${event_ts}"
-    }
   }
 
   tags = local.tags

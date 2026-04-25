@@ -25,24 +25,22 @@ variable "telemetry_queue_arn" {
   type        = string
 }
 
-variable "telemetry_queue_url" {
-  description = "SQS queue URL"
+variable "metrics_namespace" {
+  description = "CloudWatch namespace used for telemetry and events"
   type        = string
+  default     = "SCIR/Washer"
 }
 
-variable "timestream_database_name" {
-  description = "Timestream database name"
+variable "readings_metric_name" {
+  description = "CloudWatch metric name for power readings"
   type        = string
+  default     = "WasherPowerReading"
 }
 
-variable "timestream_readings_table_name" {
-  description = "Timestream readings table name"
+variable "events_metric_name" {
+  description = "CloudWatch metric name for event codes"
   type        = string
-}
-
-variable "timestream_events_table_name" {
-  description = "Timestream events table name"
-  type        = string
+  default     = "WasherEventCode"
 }
 
 variable "control_topic" {

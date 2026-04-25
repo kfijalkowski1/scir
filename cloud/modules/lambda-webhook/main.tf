@@ -28,6 +28,8 @@ module "lambda" {
     CONTROL_TOPIC     = var.control_topic
     IOT_DATA_ENDPOINT = var.iot_data_endpoint
     AUTH_SECRET_ARN   = var.webhook_auth_secret_arn
+    METRICS_NAMESPACE = var.metrics_namespace
+    EVENTS_METRIC_NAME = var.events_metric_name
     DEVICE_ID         = var.device_id
   }
 
@@ -43,6 +45,12 @@ module "lambda" {
       effect    = "Allow"
       actions   = ["secretsmanager:GetSecretValue"]
       resources = [var.webhook_auth_secret_arn]
+    }
+
+    cloudwatch_metrics_write = {
+      effect    = "Allow"
+      actions   = ["cloudwatch:PutMetricData"]
+      resources = ["*"]
     }
   }
 

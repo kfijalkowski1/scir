@@ -4,6 +4,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from typing import Any
 
 import boto3
@@ -12,16 +13,15 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-WRITE_CLIENT = boto3.client("timestream-write")
-QUERY_CLIENT = boto3.client("timestream-query")
+CLOUDWATCH_CLIENT = boto3.client("cloudwatch")
 SECRETS_CLIENT = boto3.client("secretsmanager")
 IOT_DATA_CLIENT = boto3.client(
     "iot-data", endpoint_url=f"https://{os.environ['IOT_DATA_ENDPOINT']}"
 )
 
-TIMESTREAM_DATABASE = os.environ["TIMESTREAM_DATABASE"]
-READINGS_TABLE = os.environ["READINGS_TABLE"]
-EVENTS_TABLE = os.environ["EVENTS_TABLE"]
+METRICS_NAMESPACE = os.environ["METRICS_NAMESPACE"]
+READINGS_METRIC_NAME = os.environ["READINGS_METRIC_NAME"]
+EVENTS_METRIC_NAME = os.environ["EVENTS_METRIC_NAME"]
 CONTROL_TOPIC = os.environ["CONTROL_TOPIC"]
 DEVICE_ID = os.environ.get("DEVICE_ID", "washing-machine")
 DISCORD_WEBHOOK_SECRET_ARN = os.environ.get("DISCORD_WEBHOOK_SECRET_ARN", "")
@@ -29,6 +29,12 @@ DISCORD_WEBHOOK_SECRET_ARN = os.environ.get("DISCORD_WEBHOOK_SECRET_ARN", "")
 START_POWER_THRESHOLD = float(os.environ.get("START_POWER_THRESHOLD", "10"))
 END_POWER_THRESHOLD = float(os.environ.get("END_POWER_THRESHOLD", "3"))
 LOW_POWER_WINDOW_SECONDS = int(os.environ.get("LOW_POWER_WINDOW_SECONDS", "180"))
+
+EVENT_CODE_BY_TYPE = {
+    "cycle_start": 1,
+    "cycle_end": 2,
+    "buzzer_silence": 3,
+}
 
 DISCORD_WEBHOOK_URL_CACHE: str | None = None
 
@@ -39,7 +45,7 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         return {"processed": 0, "events_emitted": 0}
 
     readings.sort(key=lambda item: item["ts_ms"])
-    _write_readings(readings)
+    _put_reading_metrics(readings)
 
     cycle_state = _current_cycle_state()
     emitted_events: list[dict[str, Any]] = []
@@ -135,91 +141,87 @@ def _extract_timestamp_ms(payload: dict[str, Any]) -> int:
     return int(time.time() * 1000)
 
 
-def _write_readings(readings: list[dict[str, Any]]) -> None:
-    records: list[dict[str, Any]] = []
+def _put_reading_metrics(readings: list[dict[str, Any]]) -> None:
+    metric_data: list[dict[str, Any]] = []
 
     for reading in readings:
-        records.append(
+        metric_data.append(
             {
-                "Dimensions": [
-                    {"Name": "device_id", "Value": DEVICE_ID},
-                    {"Name": "mqtt_topic", "Value": reading["topic"]},
-                    {"Name": "source", "Value": "shelly"},
-                ],
-                "MeasureName": "apower",
-                "MeasureValue": str(reading["power"]),
-                "MeasureValueType": "DOUBLE",
-                "Time": str(reading["ts_ms"]),
-                "TimeUnit": "MILLISECONDS",
+                "MetricName": READINGS_METRIC_NAME,
+                "Dimensions": [{"Name": "device_id", "Value": DEVICE_ID}],
+                "Timestamp": _to_datetime(reading["ts_ms"]),
+                "Value": reading["power"],
+                "Unit": "None",
             }
         )
 
-        if len(records) == 100:
-            _write_timestream_records(READINGS_TABLE, records)
-            records = []
-
-    if records:
-        _write_timestream_records(READINGS_TABLE, records)
+    _put_metric_data(metric_data)
 
 
-def _write_timestream_records(table_name: str, records: list[dict[str, Any]]) -> None:
+def _put_event_metric(event_type: str, ts_ms: int) -> None:
+    event_code = float(EVENT_CODE_BY_TYPE.get(event_type, 0))
+    metric_data = [
+        {
+            "MetricName": EVENTS_METRIC_NAME,
+            "Dimensions": [{"Name": "device_id", "Value": DEVICE_ID}],
+            "Timestamp": _to_datetime(ts_ms),
+            "Value": event_code,
+            "Unit": "Count",
+        }
+    ]
+    _put_metric_data(metric_data)
+
+
+def _put_metric_data(metric_data: list[dict[str, Any]]) -> None:
+    if not metric_data:
+        return
+
     try:
-        WRITE_CLIENT.write_records(
-            DatabaseName=TIMESTREAM_DATABASE,
-            TableName=table_name,
-            Records=records,
-        )
+        for idx in range(0, len(metric_data), 20):
+            CLOUDWATCH_CLIENT.put_metric_data(
+                Namespace=METRICS_NAMESPACE,
+                MetricData=metric_data[idx : idx + 20],
+            )
     except ClientError as exc:
-        logger.error("Timestream write failed: %s", exc)
+        logger.error("CloudWatch put_metric_data failed: %s", exc)
         raise
 
 
 def _current_cycle_state() -> str:
-    query = (
-        f"SELECT event_type FROM \"{TIMESTREAM_DATABASE}\".\"{EVENTS_TABLE}\" "
-        "WHERE measure_name = 'event_value' "
-        f"AND device_id = '{_sql_escape(DEVICE_ID)}' "
-        "AND event_type IN ('cycle_start', 'cycle_end') "
-        "ORDER BY time DESC LIMIT 1"
+    now = int(time.time() * 1000)
+    lookback_start = now - (24 * 60 * 60 * 1000)
+    points = _get_metric_points(
+        metric_name=EVENTS_METRIC_NAME,
+        start_ts_ms=lookback_start,
+        end_ts_ms=now,
+        period_seconds=60,
+        stat="Maximum",
     )
 
-    rows = _query_rows(query)
-    if not rows:
-        return "idle"
+    for _ts_ms, value in points:
+        event_code = int(round(value))
+        if event_code == EVENT_CODE_BY_TYPE["cycle_start"]:
+            return "running"
+        if event_code == EVENT_CODE_BY_TYPE["cycle_end"]:
+            return "idle"
 
-    event_type = _scalar(rows[0], 0)
-    return "running" if event_type == "cycle_start" else "idle"
+    return "idle"
 
 
 def _should_emit_cycle_end(latest_ts_ms: int) -> bool:
     window_start_ms = latest_ts_ms - (LOW_POWER_WINDOW_SECONDS * 1000)
-
-    query = (
-        "SELECT "
-        "MAX(measure_value::double) AS max_power, "
-        "to_milliseconds(MIN(time)) AS first_seen_ms "
-        f"FROM \"{TIMESTREAM_DATABASE}\".\"{READINGS_TABLE}\" "
-        f"WHERE device_id = '{_sql_escape(DEVICE_ID)}' "
-        "AND measure_name = 'apower' "
-        f"AND time BETWEEN from_milliseconds({window_start_ms}) "
-        f"AND from_milliseconds({latest_ts_ms})"
+    points = _get_metric_points(
+        metric_name=READINGS_METRIC_NAME,
+        start_ts_ms=window_start_ms,
+        end_ts_ms=latest_ts_ms,
+        period_seconds=60,
+        stat="Maximum",
     )
-
-    rows = _query_rows(query)
-    if not rows:
+    if not points:
         return False
 
-    max_power_str = _scalar(rows[0], 0)
-    first_seen_ms_str = _scalar(rows[0], 1)
-    if max_power_str is None or first_seen_ms_str is None:
-        return False
-
-    try:
-        max_power = float(max_power_str)
-        first_seen_ms = int(first_seen_ms_str)
-    except ValueError:
-        return False
-
+    max_power = max(value for _ts_ms, value in points)
+    first_seen_ms = min(ts_ms for ts_ms, _value in points)
     return max_power <= END_POWER_THRESHOLD and first_seen_ms <= window_start_ms
 
 
@@ -234,27 +236,67 @@ def _emit_cycle_event(event_type: str, ts_ms: int, action: str) -> dict[str, Any
 
     logger.info(json.dumps({"kind": "event", **event_payload}))
 
-    _write_timestream_records(
-        EVENTS_TABLE,
-        [
-            {
-                "Dimensions": [
-                    {"Name": "device_id", "Value": DEVICE_ID},
-                    {"Name": "event_type", "Value": event_type},
-                    {"Name": "source", "Value": "lambda_processor"},
-                ],
-                "MeasureName": "event_value",
-                "MeasureValue": "1",
-                "MeasureValueType": "BIGINT",
-                "Time": str(ts_ms),
-                "TimeUnit": "MILLISECONDS",
-            }
-        ],
-    )
+    _put_event_metric(event_type, ts_ms)
 
     _publish_control_event(event_payload)
     _send_discord_notification(event_payload)
     return event_payload
+
+
+def _get_metric_points(
+    metric_name: str,
+    start_ts_ms: int,
+    end_ts_ms: int,
+    period_seconds: int,
+    stat: str,
+) -> list[tuple[int, float]]:
+    points: list[tuple[int, float]] = []
+    next_token: str | None = None
+
+    while True:
+        query = {
+            "Id": "m1",
+            "MetricStat": {
+                "Metric": {
+                    "Namespace": METRICS_NAMESPACE,
+                    "MetricName": metric_name,
+                    "Dimensions": [{"Name": "device_id", "Value": DEVICE_ID}],
+                },
+                "Period": period_seconds,
+                "Stat": stat,
+            },
+            "ReturnData": True,
+        }
+
+        params: dict[str, Any] = {
+            "MetricDataQueries": [query],
+            "StartTime": _to_datetime(start_ts_ms),
+            "EndTime": _to_datetime(end_ts_ms),
+            "ScanBy": "TimestampDescending",
+            "MaxDatapoints": 500,
+        }
+        if next_token:
+            params["NextToken"] = next_token
+
+        response = CLOUDWATCH_CLIENT.get_metric_data(**params)
+        results = response.get("MetricDataResults", [])
+        if results:
+            timestamps = results[0].get("Timestamps", [])
+            values = results[0].get("Values", [])
+            for ts, value in zip(timestamps, values):
+                ts_ms = int(ts.replace(tzinfo=timezone.utc).timestamp() * 1000)
+                points.append((ts_ms, float(value)))
+
+        next_token = response.get("NextToken")
+        if not next_token:
+            break
+
+    points.sort(key=lambda item: item[0], reverse=True)
+    return points
+
+
+def _to_datetime(ts_ms: int) -> datetime:
+    return datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
 
 
 def _publish_control_event(payload: dict[str, Any]) -> None:
@@ -326,31 +368,3 @@ def _discord_webhook_url() -> str | None:
     return DISCORD_WEBHOOK_URL_CACHE
 
 
-def _query_rows(query: str) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    next_token: str | None = None
-
-    while True:
-        if next_token:
-            result = QUERY_CLIENT.query(QueryString=query, NextToken=next_token)
-        else:
-            result = QUERY_CLIENT.query(QueryString=query)
-
-        rows.extend(result.get("Rows", []))
-        next_token = result.get("NextToken")
-        if not next_token:
-            break
-
-    return rows
-
-
-def _scalar(row: dict[str, Any], index: int) -> str | None:
-    try:
-        value = row["Data"][index].get("ScalarValue")
-    except (KeyError, IndexError, TypeError):
-        return None
-    return value
-
-
-def _sql_escape(value: str) -> str:
-    return value.replace("'", "''")
