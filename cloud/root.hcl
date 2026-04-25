@@ -11,6 +11,10 @@ locals {
   washer_topic_root      = "washer"
   telemetry_topic_filter = "${local.topic_prefix_segment}/${local.environment}/${local.washer_topic_root}/+/status/switch:0"
   control_topic          = "${local.topic_prefix_segment}/${local.environment}/${local.washer_topic_root}/buzzer/events"
+  metrics_namespace      = "SCIR/Washer"
+  readings_metric_name   = "WasherPowerReading"
+  events_metric_name     = "WasherEventCode"
+  device_id              = "washing-machine"
 
   common_tags = {
     Project     = "scir"

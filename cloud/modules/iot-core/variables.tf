@@ -40,16 +40,6 @@ variable "telemetry_queue_url" {
   type        = string
 }
 
-variable "timestream_database_name" {
-  description = "Timestream database name"
-  type        = string
-}
-
-variable "timestream_events_table_name" {
-  description = "Timestream table for events"
-  type        = string
-}
-
 variable "shelly_thing_name" {
   description = "Logical suffix for Shelly IoT thing"
   type        = string

@@ -27,9 +27,9 @@ module "lambda" {
   environment_variables = {
     CONTROL_TOPIC              = var.control_topic
     IOT_DATA_ENDPOINT          = var.iot_data_endpoint
-    TIMESTREAM_DATABASE        = var.timestream_database_name
-    READINGS_TABLE             = var.timestream_readings_table_name
-    EVENTS_TABLE               = var.timestream_events_table_name
+    METRICS_NAMESPACE          = var.metrics_namespace
+    READINGS_METRIC_NAME       = var.readings_metric_name
+    EVENTS_METRIC_NAME         = var.events_metric_name
     DISCORD_WEBHOOK_SECRET_ARN = var.discord_webhook_secret_arn
     DEVICE_ID                  = var.device_id
     START_POWER_THRESHOLD      = tostring(var.start_power_threshold)
@@ -50,20 +50,18 @@ module "lambda" {
       resources = [var.telemetry_queue_arn]
     }
 
-    timestream_write = {
+    cloudwatch_metrics_write = {
       effect = "Allow"
       actions = [
-        "timestream:WriteRecords",
-        "timestream:DescribeEndpoints"
+        "cloudwatch:PutMetricData"
       ]
       resources = ["*"]
     }
 
-    timestream_query = {
+    cloudwatch_metrics_read = {
       effect = "Allow"
       actions = [
-        "timestream:Select",
-        "timestream:DescribeEndpoints"
+        "cloudwatch:GetMetricData"
       ]
       resources = ["*"]
     }

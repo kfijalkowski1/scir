@@ -38,3 +38,27 @@ variable "telemetry_queue_name" {
   description = "Telemetry SQS queue name"
   type        = string
 }
+
+variable "metrics_namespace" {
+  description = "CloudWatch namespace used for telemetry and events"
+  type        = string
+  default     = "SCIR/Washer"
+}
+
+variable "readings_metric_name" {
+  description = "CloudWatch metric name for power readings"
+  type        = string
+  default     = "WasherPowerReading"
+}
+
+variable "events_metric_name" {
+  description = "CloudWatch metric name for event codes"
+  type        = string
+  default     = "WasherEventCode"
+}
+
+variable "device_id" {
+  description = "Logical washer device ID"
+  type        = string
+  default     = "washing-machine"
+}

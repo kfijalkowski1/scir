@@ -15,30 +15,6 @@ variable "common_tags" {
   default     = {}
 }
 
-variable "readings_table_name" {
-  description = "Logical suffix for readings table"
-  type        = string
-  default     = "washer-readings"
-}
-
-variable "events_table_name" {
-  description = "Logical suffix for events table"
-  type        = string
-  default     = "washer-events"
-}
-
-variable "memory_retention_hours" {
-  description = "Timestream memory retention"
-  type        = number
-  default     = 24
-}
-
-variable "magnetic_retention_days" {
-  description = "Timestream magnetic retention"
-  type        = number
-  default     = 365
-}
-
 variable "discord_webhook_secret_name" {
   description = "Secrets Manager name suffix for Discord webhook secret"
   type        = string

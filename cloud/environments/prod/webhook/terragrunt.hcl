@@ -45,4 +45,7 @@ inputs = {
   control_topic           = dependency.messaging.outputs.control_topic
   iot_data_endpoint       = dependency.iot.outputs.iot_data_endpoint
   webhook_auth_secret_arn = dependency.data.outputs.webhook_auth_secret_arn
+  metrics_namespace       = include.root.locals.metrics_namespace
+  events_metric_name      = include.root.locals.events_metric_name
+  device_id               = include.root.locals.device_id
 }

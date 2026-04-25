@@ -35,6 +35,18 @@ variable "webhook_auth_secret_arn" {
   type        = string
 }
 
+variable "metrics_namespace" {
+  description = "CloudWatch namespace used for telemetry and events"
+  type        = string
+  default     = "SCIR/Washer"
+}
+
+variable "events_metric_name" {
+  description = "CloudWatch metric name for event codes"
+  type        = string
+  default     = "WasherEventCode"
+}
+
 variable "device_id" {
   description = "Logical washer device ID"
   type        = string

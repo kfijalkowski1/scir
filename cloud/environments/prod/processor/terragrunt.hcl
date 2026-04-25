@@ -17,9 +17,6 @@ dependency "data" {
 
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "output"]
   mock_outputs = {
-    timestream_database_name   = "scir_prod_washer"
-    readings_table_name        = "scir_prod_washer_readings"
-    events_table_name          = "scir_prod_washer_events"
     discord_webhook_secret_arn = "arn:aws:secretsmanager:eu-central-1:111111111111:secret:mock"
   }
 }
@@ -46,11 +43,12 @@ dependency "iot" {
 }
 
 inputs = {
-  telemetry_queue_arn            = dependency.messaging.outputs.telemetry_queue_arn
-  control_topic                  = dependency.messaging.outputs.control_topic
-  iot_data_endpoint              = dependency.iot.outputs.iot_data_endpoint
-  timestream_database_name       = dependency.data.outputs.timestream_database_name
-  timestream_readings_table_name = dependency.data.outputs.readings_table_name
-  timestream_events_table_name   = dependency.data.outputs.events_table_name
-  discord_webhook_secret_arn     = dependency.data.outputs.discord_webhook_secret_arn
+  telemetry_queue_arn        = dependency.messaging.outputs.telemetry_queue_arn
+  control_topic              = dependency.messaging.outputs.control_topic
+  iot_data_endpoint          = dependency.iot.outputs.iot_data_endpoint
+  discord_webhook_secret_arn = dependency.data.outputs.discord_webhook_secret_arn
+  metrics_namespace          = include.root.locals.metrics_namespace
+  readings_metric_name       = include.root.locals.readings_metric_name
+  events_metric_name         = include.root.locals.events_metric_name
+  device_id                  = include.root.locals.device_id
 }

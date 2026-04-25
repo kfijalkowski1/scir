@@ -11,7 +11,7 @@ Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz 
 # Działanie systemu
 
 - Inteligentne gniazdko mierzy zużycie energii przez pralkę i wysyła je na topic MQTT (A) w chmurze AWS  
-- Funkcja serverless pobiera wiadomości MQTT w paczkach i zapisuje je do bazy danych szeregów czasowych  
+- Funkcja serverless pobiera wiadomości MQTT w paczkach i zapisuje je do niestandardowych metryk CloudWatch  
   - Gdy zużycie energii wzrasta, jest to rejestrowane jako rozpoczęcie cyklu prania  
   - Gdy zużycie energii spadnie na określony czas (np. 3 minuty), jest to rejestrowane jako zakończenie cyklu prania  
 - W momencie rozpoczęcia / zakończenia cyklu, funkcja publikuje wiadomość na innym topicu (B)  
@@ -41,8 +41,8 @@ Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz 
 ## Wykorzystane usługi chmurowe
 
 - AWS IoT Core: broker MQTT, wspiera mTLS i może wywoływać funkcje AWS Lambda.  
-- Amazon Timestream: baza danych przeznaczona do szeregów czasowych  
 - AWS Lambda: Zapewnia środowisko uruchomieniowe dla zdefiniowanej logiki biznesowej w chmurze  
+- Amazon CloudWatch Metrics: przechowuje szeregi czasowe odczytów i zdarzeń jako metryki niestandardowe  
 - AWS API Gateway: obsługuje żądania wyciszenia buzzera wysłanego z telefonu  
 - Amazon CloudWatch Dashboards: wizualizuje szeregi czasowe, dostęp nie wymaga logowania do konta AWS
 
@@ -68,9 +68,9 @@ flowchart TD
         lambda_proc[AWS Lambda
         Logika biznesowa]
         lambda_proc@{ icon: "aws:arch-aws-lambda" }
-        db[(Amazon Timestream
-        Baza szeregów czasowych)]
-        db@{ icon: "aws:arch-amazon-timestream" }
+        metrics[(Amazon CloudWatch Metrics
+        Metryki niestandardowe)]
+        metrics@{ icon: "aws:arch-amazon-cloudwatch" }
         lambda_webhook[AWS Lambda
         Obsługa Żądań Zewnętrznych]
         lambda_webhook@{ icon: "aws:arch-aws-lambda" }
@@ -88,7 +88,8 @@ flowchart TD
 
     gniazdko -- Publikacja pomiaru zużycia mocy<br>[MQTT / mTLS] --> iot
     iot -- Pobieranie odczytów zużycia mocy w paczkach<br>[MQTT / mTLS] --> lambda_proc
-    lambda_proc -- Zapis i rotacja rekordów--> db
+    lambda_proc -- PutMetricData (odczyty i zdarzenia) --> metrics
+    lambda_webhook -- PutMetricData (wyciszenie) --> metrics
     lambda_proc -- Wykrycie zakończenia cyklu prania<br>[MQTT / mTLS] --> iot
     
     iot -- Nasłuchiwanie wiadomości o zakończeniu cyklu prania<br>[MQTT / mTLS] --> esp
@@ -99,7 +100,7 @@ flowchart TD
     api -- Integracja Proxy --> lambda_webhook
     lambda_webhook -- Wyciszenie urządzenia<br>[MQTT / mTLS] --> iot
     
-    cloudwatch -. "Zapytania SQL" .-> db
+    cloudwatch -. "Wykresy metryk i adnotacje kodów zdarzeń" .-> metrics
     phone_web -. "Dostęp do dashboardów" .-> cloudwatch
 ```
 
@@ -115,24 +116,26 @@ sequenceDiagram
     participant Plug as Smart Plug (Gniazdko)
     participant IoT as AWS IoT Core
     participant Lambda as AWS Lambda (Przetwarzanie)
-    participant DB as Amazon Timestream
+    participant CWM as CloudWatch Metrics
     participant ESP as Node ESP32 
     participant Phone as Urządzenie mobilne
     participant API as API Gateway + Lambda Webhook
 
-    Note over Plug, DB: Faza inicjalizacji i ciągłego monitoringu cyklu
+    Note over Plug, CWM: Faza inicjalizacji i ciągłego monitoringu cyklu
     Plug->>IoT: Publikacja Temat A - moc 2300W
     IoT->>Lambda: Trigger na podstawie AWS IoT Rule
-    Lambda->>DB: Archiwizacja i rejestracja pomiaru
+    Lambda->>CWM: PutMetricData - odczyt mocy
     Lambda->>Lambda: Estymacja trendu: znaczny skok (Flaga START)
+    Lambda->>CWM: PutMetricData - kod zdarzenia START
     Lambda->>IoT: Publikacja Temat B: akcja START
 
     Note over Plug, Lambda: Zakończenie pracy agregatu domowego
     Plug->>IoT: Publikacja Temat A: moc 1.5W
     IoT->>Lambda: Trigger pomiaru post-operacyjnego
-    Lambda->>DB: Zapis i ewaluacja
+    Lambda->>CWM: GetMetricData - analiza okna niskiej mocy
     Lambda->>Lambda: Warunek t ponad 3 min, P ponizej prog
     
+    Lambda->>CWM: PutMetricData - kod zdarzenia KONIEC
     Lambda->>IoT: Publikacja Temat B: akcja KONIEC BUZZER ON
     IoT->>ESP: Propagacja subskrypcji wlaczajaca Buzzer
     Lambda->>Phone: Powiadomienie Push z interaktywnym przyciskiem
@@ -145,6 +148,8 @@ sequenceDiagram
         Phone->>API: Wywołanie opcji Wycisz HTTP Webhook
         API->>IoT: Bezserwerowa publikacja Temat B: akcja WYCISZ
     end
+
+    API->>CWM: PutMetricData - kod zdarzenia WYCISZ
     
     IoT->>ESP: Odebranie żądania sprzętowego
     ESP->>ESP: Odłączenie zasilania od Buzzera

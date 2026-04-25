@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import boto3
@@ -11,15 +12,24 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 SECRETS_CLIENT = boto3.client("secretsmanager")
+CLOUDWATCH_CLIENT = boto3.client("cloudwatch")
 IOT_DATA_CLIENT = boto3.client(
     "iot-data", endpoint_url=f"https://{os.environ['IOT_DATA_ENDPOINT']}"
 )
 
 CONTROL_TOPIC = os.environ["CONTROL_TOPIC"]
 AUTH_SECRET_ARN = os.environ["AUTH_SECRET_ARN"]
+METRICS_NAMESPACE = os.environ["METRICS_NAMESPACE"]
+EVENTS_METRIC_NAME = os.environ["EVENTS_METRIC_NAME"]
 DEVICE_ID = os.environ.get("DEVICE_ID", "washing-machine")
 
 AUTH_TOKEN_CACHE: str | None = None
+
+EVENT_CODE_BY_TYPE = {
+    "cycle_start": 1,
+    "cycle_end": 2,
+    "buzzer_silence": 3,
+}
 
 
 def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
@@ -47,9 +57,32 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         qos=1,
         payload=json.dumps(payload).encode("utf-8"),
     )
+    _put_event_metric(payload)
 
     logger.info(json.dumps({"kind": "event", **payload}))
     return _response(200, {"status": "ok", "published": payload})
+
+
+def _put_event_metric(event_payload: dict[str, Any]) -> None:
+    event_code = float(EVENT_CODE_BY_TYPE.get(event_payload.get("event_type", ""), 0))
+
+    CLOUDWATCH_CLIENT.put_metric_data(
+        Namespace=METRICS_NAMESPACE,
+        MetricData=[
+            {
+                "MetricName": EVENTS_METRIC_NAME,
+                "Dimensions": [
+                    {"Name": "device_id", "Value": str(event_payload.get("device_id", DEVICE_ID))}
+                ],
+                "Timestamp": datetime.fromtimestamp(
+                    int(event_payload.get("ts", int(time.time() * 1000))) / 1000,
+                    tz=timezone.utc,
+                ),
+                "Value": event_code,
+                "Unit": "Count",
+            }
+        ],
+    )
 
 
 def _parse_body(raw_body: Any) -> dict[str, Any]:
