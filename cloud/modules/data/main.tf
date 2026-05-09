@@ -11,10 +11,12 @@ resource "aws_secretsmanager_secret" "discord_webhook" {
 }
 
 resource "aws_secretsmanager_secret_version" "discord_webhook" {
-  count = var.discord_webhook_url != "" ? 1 : 0
-
   secret_id     = aws_secretsmanager_secret.discord_webhook.id
   secret_string = jsonencode({ url = var.discord_webhook_url })
+
+  lifecycle {
+    ignore_changes = [secret_string, ]
+  }
 }
 
 resource "aws_secretsmanager_secret" "webhook_auth" {
@@ -24,8 +26,10 @@ resource "aws_secretsmanager_secret" "webhook_auth" {
 }
 
 resource "aws_secretsmanager_secret_version" "webhook_auth" {
-  count = var.webhook_auth_token != "" ? 1 : 0
-
   secret_id     = aws_secretsmanager_secret.webhook_auth.id
   secret_string = jsonencode({ token = var.webhook_auth_token })
+
+  lifecycle {
+    ignore_changes = [secret_string, ]
+  }
 }

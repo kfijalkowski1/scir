@@ -31,6 +31,8 @@ module "lambda" {
     READINGS_METRIC_NAME       = var.readings_metric_name
     EVENTS_METRIC_NAME         = var.events_metric_name
     DISCORD_WEBHOOK_SECRET_ARN = var.discord_webhook_secret_arn
+    WEBHOOK_AUTH_TOKEN         = var.webhook_auth_token
+    API_SILENCE_ENDPOINT       = var.api_silence_endpoint
     DEVICE_ID                  = var.device_id
     START_POWER_THRESHOLD      = tostring(var.start_power_threshold)
     END_POWER_THRESHOLD        = tostring(var.end_power_threshold)

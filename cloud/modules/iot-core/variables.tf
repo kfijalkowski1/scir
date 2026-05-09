@@ -52,6 +52,16 @@ variable "esp_thing_name" {
   default     = "esp32-buzzer"
 }
 
+variable "metrics_namespace" {
+  description = "CloudWatch metrics namespace"
+  type        = string
+}
+
+variable "events_metric_name" {
+  description = "CloudWatch metric name for cycle events"
+  type        = string
+}
+
 variable "shelly_publish_topic" {
   description = "Exact telemetry topic Shelly is allowed to publish to"
   type        = string

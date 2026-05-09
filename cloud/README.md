@@ -105,6 +105,8 @@ export SCIR_DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
 export SCIR_WEBHOOK_AUTH_TOKEN="<long-random-token>"
 ```
 
+Note: webhook config will not be modified in subsequent applies even if auth variables change.
+
 2. Move into the environment folder:
 
 ```bash
@@ -158,18 +160,19 @@ curl -o ~/certs/AmazonRootCA1.pem https://www.amazontrust.com/repository/AmazonR
 chmod 644 ~/certs/AmazonRootCA1.pem
 ls -l ~/certs
 
+terragrunt output -raw shelly_certificate_pem | tee shelly_cert.crt
+terragrunt output -raw shelly_private_key | tee shelly_key.key
+terragrunt output -raw esp_certificate_pem | tee esp_cert.crt
+terragrunt output -raw esp_private_key | tee esp_key.key
+
 export MQTT_CA="$HOME/certs/AmazonRootCA1.pem"
 export MQTT_HOST=$(terragrunt output -raw iot_data_endpoint)
 export MQTT_PORT=8883
 
-terragrunt output -raw shelly_certificate_pem | tee shelly_cert.crt
 export MQTT_SHELLY_CERT="$(pwd)/shelly_cert.crt"
-terragrunt output -raw shelly_private_key | tee shelly_key.key
 export MQTT_SHELLY_KEY="$(pwd)/shelly_key.key"
 
-terragrunt output -raw esp_certificate_pem | tee esp_cert.crt
 export MQTT_ESP_CERT="$(pwd)/esp_cert.crt"
-terragrunt output -raw esp_private_key | tee esp_key.key
 export MQTT_ESP_KEY="$(pwd)/esp_key.key"
 
 export TELEMETRY_TOPIC="scir/prod/washer/shelly-plug/status/switch:0"
@@ -212,22 +215,43 @@ mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" \
 To trigger cycle detection with defaults:
 
 - publish high power (>= `10W`) to trigger `cycle_start`
-- then keep power low (<= `3W`) for ~`180s` to allow `cycle_end`
+- then keep power low (<= `10W`) for ~`30s` to allow `cycle_end`
 
 These are current processor defaults (`START_POWER_THRESHOLD`, `END_POWER_THRESHOLD`, `LOW_POWER_WINDOW_SECONDS`) and may be tuned in future deployments.
 They are defined in `cloud/modules/lambda-processor/src/handler.py` and set through Lambda environment variables from `cloud/modules/lambda-processor/main.tf`.
 
 ### 4 Emulate user silencing the buzzer (board button / app webhook effect)
 
-Publish silence event directly to control topic:
+**Option 1: Using the ESP32 board identity (MQTT)**
 
-**not yet working!**
+Publish silence event directly to control topic using the ESP32 identity:
 
 ```bash
 mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" \
-  --cafile "$MQTT_CA" --cert "$MQTT_CERT" --key "$MQTT_KEY" \
-  -q 1 -t "$CONTROL_TOPIC" \
-  -m '{"event_type":"buzzer_silence","action":"buzzer_off","source":"esp32","device_id":"washing-machine","ts":1735689600000}' -d
+  --cafile "$MQTT_CA" --cert "$MQTT_ESP_CERT" --key "$MQTT_ESP_KEY" \
+  -q 1 -t "$CONTROL_TOPIC" -i "$MQTT_ESP_CLIENT_ID" \
+  -m '{"event_type":"buzzer_silence","action":"buzzer_off","source":"esp32","device_id":"washing-machine"}' -d
+```
+
+You should see the event on the cloudwatch dashboard (nothing else will happen).
+
+**Option 2: Using the API Gateway Webhook (HTTP)**
+
+Send a POST request to the deployed webhook URL:
+
+```bash
+# Step 1: Retrieve the exact token from the infrastructure
+export SECRET_ARN=$(cd data && terragrunt output -raw webhook_auth_secret_arn)
+export SCIR_WEBHOOK_AUTH_TOKEN=$(aws secretsmanager get-secret-value --secret-id $SECRET_ARN --query SecretString --output text | jq -r .token)
+
+# Step 2: Grab the endpoint URL 
+export WEBHOOK_URL=$(cd api && terragrunt output -raw silence_endpoint)
+
+# Step 3: Trigger the event via curl (should return 200 OK)
+curl -i -X POST "$WEBHOOK_URL" \
+  -H "x-scir-token: $SCIR_WEBHOOK_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action": "silence"}'
 ```
 
 ## Expected MQTT message schema
@@ -279,7 +303,6 @@ Payload shape:
   "event_type": "cycle_start | cycle_end | buzzer_silence",
   "action": "cycle_started | buzzer_on | buzzer_off",
   "source": "lambda_processor | api_webhook | esp32",
-  "device_id": "washing-machine",
-  "ts": 1735689600000
+  "device_id": "washing-machine"
 }
 ```

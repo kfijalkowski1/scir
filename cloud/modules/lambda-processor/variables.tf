@@ -58,6 +58,16 @@ variable "discord_webhook_secret_arn" {
   type        = string
 }
 
+variable "webhook_auth_token" {
+  description = "Authentication token for incoming webhook requests"
+  type        = string
+}
+
+variable "api_silence_endpoint" {
+  description = "API Gateway endpoint for buzzer silence"
+  type        = string
+}
+
 variable "start_power_threshold" {
   description = "Power threshold (W) indicating cycle start"
   type        = number
@@ -67,13 +77,13 @@ variable "start_power_threshold" {
 variable "end_power_threshold" {
   description = "Power threshold (W) for low-power end detection"
   type        = number
-  default     = 3
+  default     = 10
 }
 
 variable "low_power_window_seconds" {
   description = "Low-power duration to mark cycle end"
   type        = number
-  default     = 180
+  default     = 30
 }
 
 variable "device_id" {
@@ -85,7 +95,7 @@ variable "device_id" {
 variable "batch_size" {
   description = "SQS batch size for Lambda event source mapping"
   type        = number
-  default     = 100
+  default     = 10
 }
 
 variable "max_batching_window_seconds" {

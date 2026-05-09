@@ -56,3 +56,25 @@ module "lambda" {
 
   tags = local.tags
 }
+
+resource "aws_lambda_permission" "iot_invoke" {
+  statement_id  = "AllowExecutionFromIoT"
+  action        = "lambda:InvokeFunction"
+  function_name = module.lambda.lambda_function_name
+  principal     = "iot.amazonaws.com"
+  source_arn    = aws_iot_topic_rule.control_events_to_webhook.arn
+}
+
+resource "aws_iot_topic_rule" "control_events_to_webhook" {
+  name        = replace("${local.name_prefix}control_events_to_webhook", "-", "_")
+  description = "Trigger webhook lambda on hardware control events"
+  enabled     = true
+  sql         = "SELECT * FROM '${var.control_topic}' WHERE event_type = 'buzzer_silence'"
+  sql_version = "2016-03-23"
+
+  lambda {
+    function_arn = module.lambda.lambda_function_arn
+  }
+
+  tags = local.tags
+}

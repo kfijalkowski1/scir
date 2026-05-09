@@ -23,12 +23,13 @@ METRICS_NAMESPACE = os.environ["METRICS_NAMESPACE"]
 READINGS_METRIC_NAME = os.environ["READINGS_METRIC_NAME"]
 EVENTS_METRIC_NAME = os.environ["EVENTS_METRIC_NAME"]
 CONTROL_TOPIC = os.environ["CONTROL_TOPIC"]
-DEVICE_ID = os.environ.get("DEVICE_ID", "washing-machine")
-DISCORD_WEBHOOK_SECRET_ARN = os.environ.get("DISCORD_WEBHOOK_SECRET_ARN", "")
-
-START_POWER_THRESHOLD = float(os.environ.get("START_POWER_THRESHOLD", "10"))
-END_POWER_THRESHOLD = float(os.environ.get("END_POWER_THRESHOLD", "3"))
-LOW_POWER_WINDOW_SECONDS = int(os.environ.get("LOW_POWER_WINDOW_SECONDS", "180"))
+DEVICE_ID = os.environ["DEVICE_ID"]
+DISCORD_WEBHOOK_SECRET_ARN = os.environ["DISCORD_WEBHOOK_SECRET_ARN"]
+WEBHOOK_AUTH_TOKEN = os.environ["WEBHOOK_AUTH_TOKEN"]
+API_SILENCE_ENDPOINT = os.environ["API_SILENCE_ENDPOINT"]
+START_POWER_THRESHOLD = float(os.environ["START_POWER_THRESHOLD"])
+END_POWER_THRESHOLD = float(os.environ["END_POWER_THRESHOLD"])
+LOW_POWER_WINDOW_SECONDS = int(os.environ["LOW_POWER_WINDOW_SECONDS"])
 
 EVENT_CODE_BY_TYPE = {
     "cycle_start": 1,
@@ -37,9 +38,11 @@ EVENT_CODE_BY_TYPE = {
 }
 
 DISCORD_WEBHOOK_URL_CACHE: str | None = None
+API_TOKEN_CACHE: str | None = None
 
 
 def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
+    logger.info("Received event: %s", json.dumps(event))
     readings = _extract_readings(event)
     if not readings:
         return {"processed": 0, "events_emitted": 0}
@@ -64,7 +67,7 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
                 break
 
     latest_ts_ms = readings[-1]["ts_ms"]
-    if cycle_state == "running" and _should_emit_cycle_end(latest_ts_ms):
+    if cycle_state == "running" and _should_emit_cycle_end(latest_ts_ms, readings):
         emitted_events.append(
             _emit_cycle_event(
                 event_type="cycle_end",
@@ -82,19 +85,32 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
 
 def _extract_readings(event: dict[str, Any]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
+    
+    if "Records" not in event:
+        raise ValueError("Event does not contain 'Records'")
 
-    for record in event.get("Records", []):
+    records = event["Records"]
+    if not records:
+        raise ValueError("Event 'Records' array is empty")
+
+    for record in records:
+        body_str = record.get("body")
+        if not body_str:
+            raise ValueError("SQS record missing 'body'")
+
         try:
-            body = json.loads(record.get("body", "{}"))
-        except json.JSONDecodeError:
-            logger.warning("Skipping malformed SQS payload")
-            continue
+            body = json.loads(body_str)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Malformed JSON in SQS body: {exc}")
 
         power = _extract_apower(body)
         if power is None:
-            continue
+            raise ValueError(f"Payload missing apower measurement: {body}")
 
         topic = str(body.get("mqtt_topic", "unknown"))
+        if topic == "unknown":
+            raise ValueError("Payload missing mqtt_topic")
+            
         ts_ms = _extract_timestamp_ms(body)
 
         logger.info(
@@ -208,21 +224,34 @@ def _current_cycle_state() -> str:
     return "idle"
 
 
-def _should_emit_cycle_end(latest_ts_ms: int) -> bool:
+def _should_emit_cycle_end(latest_ts_ms: int, readings: list[dict[str, Any]]) -> bool:
     window_start_ms = latest_ts_ms - (LOW_POWER_WINDOW_SECONDS * 1000)
-    points = _get_metric_points(
-        metric_name=READINGS_METRIC_NAME,
-        start_ts_ms=window_start_ms,
-        end_ts_ms=latest_ts_ms,
-        period_seconds=60,
-        stat="Maximum",
-    )
-    if not points:
-        return False
+    
+    recent_readings = [r for r in readings if r["ts_ms"] >= window_start_ms]
+    if recent_readings:
+        max_recent = max(r["power"] for r in recent_readings)
+        if max_recent > END_POWER_THRESHOLD:
+            return False
 
-    max_power = max(value for _ts_ms, value in points)
-    first_seen_ms = min(ts_ms for ts_ms, _value in points)
-    return max_power <= END_POWER_THRESHOLD and first_seen_ms <= window_start_ms
+    oldest_recent_ts = min(r["ts_ms"] for r in recent_readings) if recent_readings else latest_ts_ms
+    cw_end_ms = oldest_recent_ts
+    
+    if cw_end_ms > window_start_ms:
+        points = _get_metric_points(
+            metric_name=READINGS_METRIC_NAME,
+            start_ts_ms=window_start_ms,
+            end_ts_ms=cw_end_ms,
+            period_seconds=60,
+            stat="Maximum",
+        )
+        if points:
+            max_cw = max(value for _ts_ms, value in points)
+            if max_cw > END_POWER_THRESHOLD:
+                return False
+        elif not recent_readings:
+            return False
+
+    return True
 
 
 def _emit_cycle_event(event_type: str, ts_ms: int, action: str) -> dict[str, Any]:
@@ -278,7 +307,11 @@ def _get_metric_points(
         if next_token:
             params["NextToken"] = next_token
 
-        response = CLOUDWATCH_CLIENT.get_metric_data(**params)
+        try:
+            response = CLOUDWATCH_CLIENT.get_metric_data(**params)
+        except ClientError as exc:
+            raise RuntimeError(f"Failed to get metric data: {exc}")
+
         results = response.get("MetricDataResults", [])
         if results:
             timestamps = results[0].get("Timestamps", [])
@@ -300,30 +333,36 @@ def _to_datetime(ts_ms: int) -> datetime:
 
 
 def _publish_control_event(payload: dict[str, Any]) -> None:
-    IOT_DATA_CLIENT.publish(
-        topic=CONTROL_TOPIC,
-        qos=1,
-        payload=json.dumps(payload).encode("utf-8"),
-    )
+    try:
+        IOT_DATA_CLIENT.publish(
+            topic=CONTROL_TOPIC,
+            qos=1,
+            payload=json.dumps(payload).encode("utf-8"),
+        )
+    except ClientError as exc:
+        raise RuntimeError(f"IoT publish control event failed: {exc}")
 
 
 def _send_discord_notification(event_payload: dict[str, Any]) -> None:
     webhook_url = _discord_webhook_url()
     if not webhook_url:
-        return
+        raise ValueError("Discord webhook URL not configured")
 
     if event_payload["event_type"] == "cycle_end":
-        message = "Pralka zakonczyla cykl. Buzzer aktywny."
+        message = ":robot: Washing cycle ended."
     elif event_payload["event_type"] == "cycle_start":
-        message = "Pralka rozpoczela cykl."
+        message = ":robot: Washing cycle started."
     else:
-        message = f"Wydarzenie: {event_payload['event_type']}"
+        message = f":robot: Event: {event_payload['event_type']}"
 
     body = json.dumps({"content": message}).encode("utf-8")
     req = urllib.request.Request(
         webhook_url,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.47 Safari/537.36'
+        },
         method="POST",
     )
 
@@ -331,7 +370,7 @@ def _send_discord_notification(event_payload: dict[str, Any]) -> None:
         with urllib.request.urlopen(req, timeout=5):
             return
     except (urllib.error.URLError, urllib.error.HTTPError) as exc:
-        logger.warning("Discord webhook send failed: %s", exc)
+        raise RuntimeError(f"Discord webhook send failed: {exc}")
 
 
 def _discord_webhook_url() -> str | None:
@@ -341,30 +380,23 @@ def _discord_webhook_url() -> str | None:
         return DISCORD_WEBHOOK_URL_CACHE
 
     if not DISCORD_WEBHOOK_SECRET_ARN:
-        DISCORD_WEBHOOK_URL_CACHE = ""
-        return None
+        raise ValueError("Discord webhook secret ARN not configured")
 
     try:
         response = SECRETS_CLIENT.get_secret_value(SecretId=DISCORD_WEBHOOK_SECRET_ARN)
     except ClientError as exc:
-        logger.warning("Unable to read Discord secret: %s", exc)
-        DISCORD_WEBHOOK_URL_CACHE = ""
-        return None
+        raise RuntimeError(f"Unable to read Discord secret: {exc}")
 
     secret_string = response.get("SecretString", "")
     if not secret_string:
-        DISCORD_WEBHOOK_URL_CACHE = ""
-        return None
+        raise ValueError("Discord secret has no SecretString")
 
     try:
         secret_json = json.loads(secret_string)
         if isinstance(secret_json, dict) and "url" in secret_json:
             DISCORD_WEBHOOK_URL_CACHE = str(secret_json["url"])
             return DISCORD_WEBHOOK_URL_CACHE
-    except json.JSONDecodeError:
-        pass
-
-    DISCORD_WEBHOOK_URL_CACHE = secret_string
-    return DISCORD_WEBHOOK_URL_CACHE
-
-
+        else:
+            raise ValueError("Discord secret JSON does not contain 'url' key")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Discord secret string is not valid JSON: {repr(e)}")

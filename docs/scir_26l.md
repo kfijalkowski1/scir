@@ -52,7 +52,6 @@ Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz 
 ---
 config:
   layout: elk
-  <!-- theme: neutral -->
 ---
 flowchart TD
     subgraph WLAN [Sieć WLAN]

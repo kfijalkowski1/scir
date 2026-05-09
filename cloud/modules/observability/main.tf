@@ -19,12 +19,12 @@ resource "aws_cloudwatch_dashboard" "this" {
           title  = "Lambda Invocations and Errors"
           region = var.aws_region
           stat   = "Sum"
-          period = 300
+          period = 60
           metrics = [
             ["AWS/Lambda", "Invocations", "FunctionName", var.processor_lambda_name, { label = "Processor Invocations" }],
             [".", "Errors", ".", ".", { label = "Processor Errors" }],
-            ["AWS/Lambda", "Invocations", "FunctionName", var.webhook_lambda_name, { label = "Webhook Invocations" }],
-            [".", "Errors", ".", ".", { label = "Webhook Errors" }]
+            ["AWS/Lambda", "Invocations", "FunctionName", var.webhook_lambda_name, { label = "Buzzer Silence Invocations" }],
+            [".", "Errors", ".", ".", { label = "Buzzer Silence Errors" }]
           ]
         }
       },
@@ -38,7 +38,7 @@ resource "aws_cloudwatch_dashboard" "this" {
           title  = "Washer Power Reading"
           region = var.aws_region
           stat   = "Maximum"
-          period = 60
+          period = 30
           metrics = [
             [var.metrics_namespace, var.readings_metric_name, "device_id", var.device_id, { label = "Power (W)" }]
           ]
@@ -59,7 +59,7 @@ resource "aws_cloudwatch_dashboard" "this" {
           title  = "Event Timeline (Numeric Codes)"
           region = var.aws_region
           stat   = "Maximum"
-          period = 60
+          period = 5
           metrics = [
             [var.metrics_namespace, var.events_metric_name, "device_id", var.device_id, { label = "Event Code" }]
           ]
@@ -98,7 +98,7 @@ resource "aws_cloudwatch_dashboard" "this" {
           title  = "Telemetry Queue Depth"
           region = var.aws_region
           stat   = "Average"
-          period = 300
+          period = 30
           metrics = [
             ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", var.telemetry_queue_name]
           ]
