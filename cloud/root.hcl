@@ -52,6 +52,10 @@ provider "aws" {
   default_tags {
     tags = ${jsonencode(local.common_tags)}
   }
+
+  ignore_tags {
+    keys = ["awsApplication"]
+  }
 }
 EOF
 }
