@@ -1,0 +1,45 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AllowIndividualUserToListOnlyTheirOwnMFA",
+            "Effect": "Allow",
+            "Action": [
+                "iam:ListMFADevices"
+            ],
+            "Resource": [
+                "arn:aws:iam::*:user/${aws:username}"
+            ]
+        },
+        {
+            "Sid": "BlockIndividualUserToListOtherMFAsWithoutMFA",
+            "Effect": "Deny",
+            "Action": [
+                "iam:ListMFADevices"
+            ],
+            "NotResource": [
+                "arn:aws:iam::*:user/${aws:username}"
+            ],
+            "Condition": {
+                "BoolIfExists": {
+                    "aws:MultiFactorAuthPresent": "false"
+                }
+            }
+        },
+        {
+            "Sid": "BlockMostAccessUnlessSignedInWithMFA",
+            "Effect": "Deny",
+            "NotAction": [
+                "iam:ListMFADevices",
+                "sts:GetSessionToken",
+                "sts:GetCallerIdentity"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "BoolIfExists": {
+                    "aws:MultiFactorAuthPresent": "false"
+                }
+            }
+        }
+    ]
+}
