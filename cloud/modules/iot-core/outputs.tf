@@ -51,3 +51,19 @@ output "shelly_publish_topic" {
   description = "Exact telemetry topic expected from Shelly"
   value       = local.shelly_topic
 }
+
+output "shelly_mqtt_password" {
+  description = "Generated MQTT password for Shelly basic auth (used when shelly_auth_mode = 'basic')"
+  value       = random_password.shelly_mqtt.result
+  sensitive   = true
+}
+
+output "shelly_mqtt_username" {
+  description = "MQTT username for Shelly basic auth — just the thing name, no query string needed (used when shelly_auth_mode = 'basic')"
+  value       = aws_iot_thing.shelly.name
+}
+
+output "shelly_mqtt_host" {
+  description = "MQTT broker hostname for Shelly basic auth; connect on port 8883 without a client certificate (only set when shelly_auth_mode = 'basic')"
+  value       = var.shelly_auth_mode == "basic" ? aws_iot_domain_configuration.shelly_basic_auth[0].domain_name : null
+}

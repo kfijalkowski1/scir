@@ -149,6 +149,72 @@ resource "aws_iam_role_policy" "telemetry_rule" {
   })
 }
 
+resource "random_password" "shelly_mqtt" {
+  length  = 32
+  special = false
+}
+
+module "shelly_authorizer_lambda" {
+  source  = "terraform-aws-modules/lambda/aws"
+  version = "~> 8.8"
+
+  function_name = "${local.name_prefix}shelly-authorizer"
+  description   = "MQTT custom authorizer for Shelly plug: validates username/password"
+  handler       = "handler.lambda_handler"
+  runtime       = "python3.12"
+  source_path   = "${path.module}/src/authorizer"
+  timeout       = 5
+  memory_size   = 128
+
+  cloudwatch_logs_retention_in_days = 30
+
+  environment_variables = {
+    EXPECTED_USERNAME = aws_iot_thing.shelly.name
+    EXPECTED_PASSWORD = random_password.shelly_mqtt.result
+    ACCOUNT_ID        = data.aws_caller_identity.current.account_id
+    AWS_REGION_NAME   = var.aws_region
+    THING_NAME        = aws_iot_thing.shelly.name
+    PUBLISH_TOPIC     = local.shelly_topic
+  }
+
+  tags = local.tags
+}
+
+resource "aws_lambda_permission" "iot_invoke_shelly_authorizer" {
+  statement_id  = "AllowIoTCustomAuthorizer"
+  action        = "lambda:InvokeFunction"
+  function_name = module.shelly_authorizer_lambda.lambda_function_name
+  principal     = "iot.amazonaws.com"
+  source_arn    = aws_iot_authorizer.shelly.arn
+}
+
+resource "aws_iot_authorizer" "shelly" {
+  name                    = "${local.name_prefix}shelly-authorizer"
+  authorizer_function_arn = module.shelly_authorizer_lambda.lambda_function_arn
+  signing_disabled        = true
+  status                  = var.shelly_auth_mode == "basic" ? "ACTIVE" : "INACTIVE"
+
+  tags = local.tags
+}
+
+# Dedicated domain configuration so Shelly can connect on port 8883 without a
+# client certificate. The default authorizer is invoked for every unauthenticated
+# connection, removing the need for a query string in the MQTT username.
+resource "aws_iot_domain_configuration" "shelly_basic_auth" {
+  count                = var.shelly_auth_mode == "basic" ? 1 : 0
+  name                 = "${local.name_prefix}shelly-basic-auth"
+  status               = "ENABLED"
+  authentication_type  = "CUSTOM_AUTH"
+  application_protocol = "SECURE_MQTT"
+
+  authorizer_config {
+    default_authorizer_name   = aws_iot_authorizer.shelly.name
+    allow_authorizer_override = false
+  }
+
+  tags = local.tags
+}
+
 resource "aws_iot_topic_rule" "telemetry_to_sqs" {
   name        = local.telemetry_rule_name
   description = "Buffer Shelly telemetry in SQS for batched Lambda processing"

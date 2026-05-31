@@ -15,6 +15,7 @@ locals {
   readings_metric_name   = "WasherPowerReading"
   events_metric_name     = "WasherEventCode"
   device_id              = "washing-machine"
+  shelly_auth_mode       = "basic"
 
   common_tags = {
     Project     = "scir"

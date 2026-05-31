@@ -254,6 +254,55 @@ curl -i -X POST "$WEBHOOK_URL" \
   -d '{"action": "silence"}'
 ```
 
+### 5 Testing Shelly basic auth mode
+
+When the stack is deployed with `shelly_auth_mode = "basic"`, the Shelly connects using MQTT username/password instead of a client certificate. AWS IoT Core routes the connection through the Lambda custom authorizer.
+
+> **Prerequisite:** redeploy the `iot` unit with `shelly_auth_mode = "basic"` in `environments/prod/iot/terragrunt.hcl`.
+
+#### Retrieve credentials
+
+```shell
+cd cloud/environments/prod/iot
+
+# Dedicated endpoint for basic auth (a new domain configuration without a cert requirement)
+export MQTT_SHELLY_BASIC_HOST=$(terragrunt output -raw shelly_mqtt_host)
+
+# MQTT username — just the thing name (the authorizer is the default on this endpoint)
+export MQTT_SHELLY_USERNAME=$(terragrunt output -raw shelly_mqtt_username)
+
+# Generated password (sensitive output)
+export MQTT_SHELLY_PASSWORD=$(terragrunt output -raw shelly_mqtt_password)
+
+echo "host: $MQTT_SHELLY_BASIC_HOST  username: $MQTT_SHELLY_USERNAME"
+```
+
+#### Publish a telemetry reading (username/password, no client cert)
+
+Use the dedicated endpoint on port 8883 — no client certificate, no ALPN required:
+
+```shell
+mosquitto_pub -h "$MQTT_SHELLY_BASIC_HOST" -p 8883 \
+  --cafile "$MQTT_CA" \
+  -u "$MQTT_SHELLY_USERNAME" -P "$MQTT_SHELLY_PASSWORD" \
+  -i "$MQTT_SHELLY_CLIENT_ID" \
+  -q 1 -t "$TELEMETRY_TOPIC" \
+  -m '{"apower": 1250.4}' -d
+```
+
+#### Verify the authorizer rejects bad credentials
+
+```shell
+mosquitto_pub -h "$MQTT_SHELLY_BASIC_HOST" -p 8883 \
+  --cafile "$MQTT_CA" \
+  -u "$MQTT_SHELLY_USERNAME" -P "wrongpassword" \
+  -i "$MQTT_SHELLY_CLIENT_ID" \
+  -q 1 -t "$TELEMETRY_TOPIC" \
+  -m '{"apower": 0}' -d
+```
+
+This should result in a connection refusal (exit code non-zero).
+
 ## Expected MQTT message schema
 
 ### Telemetry from Shelly (Gen3-compatible topic)

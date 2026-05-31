@@ -32,4 +32,5 @@ inputs = {
   telemetry_queue_url    = dependency.messaging.outputs.telemetry_queue_url
   metrics_namespace      = include.root.locals.metrics_namespace
   events_metric_name     = include.root.locals.events_metric_name
+  shelly_auth_mode       = include.root.locals.shelly_auth_mode
 }

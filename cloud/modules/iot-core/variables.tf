@@ -67,3 +67,14 @@ variable "shelly_publish_topic" {
   type        = string
   default     = ""
 }
+
+variable "shelly_auth_mode" {
+  description = "Auth mode for Shelly: 'mtls' uses the X.509 certificate; 'basic' uses a Lambda custom authorizer checking MQTT username/password"
+  type        = string
+  default     = "mtls"
+
+  validation {
+    condition     = contains(["mtls", "basic"], var.shelly_auth_mode)
+    error_message = "shelly_auth_mode must be 'mtls' or 'basic'."
+  }
+}
