@@ -113,18 +113,8 @@ resource "aws_cloudwatch_dashboard" "this" {
         properties = {
           title  = "Recent Telemetry and Events"
           region = var.aws_region
-          query  = "SOURCE '/aws/lambda/${local.name_prefix}' | filter @log = '${var.processor_log_group_name}' or @log = '${var.webhook_log_group_name}' | fields @timestamp, @message, @log | sort @timestamp desc | limit 100"
+          query  = "SOURCE '${var.processor_log_group_name}' | SOURCE '${var.webhook_log_group_name}' | fields @timestamp, @message, @log | sort @timestamp desc | limit 100"
           view   = "table"
-        }
-      },
-      {
-        type   = "text"
-        x      = 0
-        y      = 19
-        width  = 24
-        height = 3
-        properties = {
-          markdown = "# SCIR Dashboard\\nUse CloudWatch dashboard sharing in AWS Console if you need a public URL."
         }
       }
     ]
