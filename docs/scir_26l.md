@@ -21,7 +21,7 @@ Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz 
 - Jednocześnie na telefon z systemem Android wysyłane jest powiadomienie push  
 - Naciśnięcie przycisku lub kliknięcie powiadomienia push przez użytkownika powoduje opublikowanie wiadomości na topicu (B)  
 - ESP32 odbiera wiadomość z topicu B i wyłącza buzzer  
-- W dowolnym momencie powinna istnieć możliwość podglądu surowych odczytów z inteligentnego gniazdka oraz wykrytych zdarzeń (rozpoczęcie cyklu, zakończenie cyklu, wyciszenie brzęczyka) za pośrednictwem interfejsu webowego lub aplikacji mobilnej
+- W dowolnym momencie powinna istnieć możliwość podglądu surowych odczytów z inteligentnego gniazdka oraz wykrytych zdarzeń (rozpoczęcie cyklu, zakończenie cyklu, wyciszenie buzzera) za pośrednictwem interfejsu webowego lub aplikacji mobilnej
 
 # Wybrane czujniki
 
@@ -36,17 +36,19 @@ Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz 
 
 # Architektura rozwiązania
 
-## Schemat połączeń
+## Schemat połączeń płytki
 
 ![](assets/connections.png)
 
 ## Wykorzystane usługi chmurowe
 
+Ponieważ system przeznaczony jest do faktycznego wykorzystania po zakończeniu realizacji projektu, kluczowym kryterium w projektowaniu architektury było ograniczenie kosztów działania. Miało ono kluczowe znaczenie przy wyborze usług AWS: system korzysta jedynie z usług serverless rozliczanych wg faktycznego wykorzystania, co pozwala zminimalizować koszty.
+
 - AWS IoT Core: broker MQTT, wspiera mTLS i może wywoływać funkcje AWS Lambda.  
 - AWS Lambda: Zapewnia środowisko uruchomieniowe dla zdefiniowanej logiki biznesowej w chmurze  
 - Amazon CloudWatch Metrics: przechowuje szeregi czasowe odczytów i zdarzeń jako metryki 
 - AWS API Gateway: obsługuje żądania wyciszenia buzzera wysłane z telefonu  
-- Amazon CloudWatch Dashboards: wizualizuje szeregi czasowe, dostęp nie wymaga logowania do konta AWS
+- Amazon CloudWatch Dashboards: wizualizuje szeregi czasowe; dostęp z konsoli AWS lub przez opcjonalny link publiczny udostępniony z poziomu konsoli
 
 ## Schemat komunikacji
 
@@ -261,3 +263,33 @@ Zgromadzone dane pomiarowe oraz wygenerowane informacje o stanie cyklu pralki pr
 W produkcji wykorzystywane są dwie metryki niestandardowe w przestrzeni nazw `SCIR/Washer`. Metryka `WasherPowerReading` przechowuje kolejne odczyty mocy w watach z wymiarem `device_id`. Metryka `WasherEventCode` rejestruje zdarzenia dyskretne powiązane ze stanami: kod `1` odpowiada `cycle_start` (przejście do stanu "pranie"), kod `2` zdarzeniu `cycle_end` (przejście do stanu "buzzer"), kod `3` zdarzeniu `buzzer_off` (powrót do bezczynności). Na podstawie ostatniego z nich w kolejności czasowej odtwarzany jest bieżący stan systemu.
 
 Funkcja `processor` zapisuje metryki w standardowej rozdzielczości CloudWatch (sześćdziesiąt sekund). Zapytania o stan cyklu korzystają z tej samej rozdzielczości przy odczycie historii. Zgodnie z polityką retencji AWS dane o rozdzielczości większej niż 60s przechowywane są przez jedynie trzy godziny, natomiast dane w rozdzielczości sześćdziesięciu sekund i więcej mają retencję czternastu dni.
+
+# Wizualizacja danych
+
+Do wizualizacji zebranych danych wykorzystano usługę Amazon CloudWatch Dashboards. Interfejs webowy  łączy na jednym ekranie szeregi pomiarowe, zdarzenia cyklu prania, stan kolejki telemetrycznej, aktywność funkcji serverless oraz ostatnie wpisy dziennika.
+
+![](assets/scir-dashboard.png)
+
+## Widżety i prezentowane wartości
+
+Układ składa się z czterech wykresów liniowych u góry oraz szerokiej tabeli logów u dołu.
+
+Pierwszy panel, „Lambda Invocations and Errors”, pokazuje liczbę wywołań i błędów dwóch funkcji serverless: przetwarzającej odczyty z wtyczki (`processor`) oraz obsługującej wyciszenie buzzera (`webhook`). Pojedyncze kropki na wykresie odpowiadają paczkom odczytów lub pojedynczym żądaniom HTTP; brak błędów świadczy o prawidłowym działaniu systemu.
+
+„Washer Power Reading” przedstawia pobór mocy pralki w watach na podstawie metryki `WasherPowerReading`. Na zrzucie ekranu widać typowy przebieg cyklu: faza bezczynna przy około 0,15 W, gwałtowny wzrost do około 2 kW podczas grzania wody, na koniec cyklu chwilowy wzrost użycia podczas wirowania i powrót do niskiego poboru po zakończeniu programu.
+
+„Event Timeline (Numeric Codes)” wizualizuje metrykę `WasherEventCode`. Oś pionowa przyjmuje wartości od 1 do 3; poziome adnotacje oznaczają kody `1` (cycle_start, przejście do stanu prania), `2` (cycle_end, przejście do stanu buzzer) oraz `3` (buzzer_silence, powrót do bezczynności po akcji `buzzer_off`).
+
+„Telemetry Queue Depth” monitoruje liczbę wiadomości oczekujących w kolejce telemetrycznej między brokerem MQTT a funkcją przetwarzającą. Wykres wskazuje, czy napływ odczytów z wtyczki jest buforowany z opóźnieniem. Stała wartość równa zero lub bardzo bliska zeru oznacza, że chmura nadąża za tempem publikacji.
+
+Na dole ekranu znajduje się tabela „Recent Telemetry and Events”, zbierająca logi z funkcji `processor` i `webhook`. Widok zbiera w jednym miejscu ostatnie wpisy obu funkcji i pokazuje dla każdego rekordu moment zapisu, pełną treść oraz nazwę grupy logów, z której pochodzi. Dzięki temu w jednej tabeli widać zarówno kolejne odczyty mocy, jak i zarejestrowane zdarzenia sterujące, co ułatwia debugowanie.
+
+## Konfiguracja i dostęp
+
+Dashboard konfiguruje się w całości z poziomu konsoli CloudWatch. U góry ekranu wybiera się globalny zakres czasu: predefiniowany (jedna lub trzy godziny, dwanaście godzin, jeden lub trzy dni, tydzień) albo dowolny przedział kalendarzowy. Można ustawić strefę czasową (domyślnie UTC), oraz włączyć automatyczne odświeżanie albo ręcznie przeładować dane.
+
+Standardowy dostęp wymaga zalogowania do konta AWS z uprawnieniami do odczytu CloudWatch. Dodatkowo z poziomu konsoli można wygenerować publiczny link do dashboardu; po jego udostępnieniu podgląd działa w przeglądarce bez logowania, co pozwala na łatwy dostęp z urządzenia mobilnego.
+
+# Napotkane problemy
+
+# Wnioski
