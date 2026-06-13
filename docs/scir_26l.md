@@ -15,7 +15,7 @@ Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz 
 - Inteligentne gniazdko mierzy zużycie energii przez pralkę i wysyła je na topic MQTT (A) w chmurze AWS  
 - Funkcja serverless pobiera wiadomości MQTT w paczkach i zapisuje je do niestandardowych metryk CloudWatch  
   - Gdy zużycie energii wzrasta, jest to rejestrowane jako rozpoczęcie cyklu prania  
-  - Gdy zużycie energii utrzymuje się poniżej progu przez określony czas (2 minuty), rejestrowane jest zakończenie cyklu prania  
+  - Gdy zużycie energii utrzymuje się poniżej progu przez określony czas (2 minuty), rejestrowane jest zakończenie cyklu prania
 - W momencie rozpoczęcia lub zakończenia cyklu funkcja publikuje wiadomość na topicu zdarzeń (B)  
 - Po zakończeniu cyklu wiadomość dociera do urządzenia ESP32 wyposażonego w buzzer i przycisk; buzzer zaczyna wydawać dźwięk  
 - Jednocześnie na telefon z systemem Android wysyłane jest powiadomienie push  
@@ -25,20 +25,20 @@ Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz 
 
 # Wybrane czujniki
 
-- Seeed Xiao ESP32-S3 \- WiFi/Bluetooth \- Seeedstudio 113991114  
-- Moduł z buzzerem aktywnym z generatorem \- SENV0005  
-- Tact Switch 12x12mm \- przyciski kolorowe \- 4szt. \- SparkFun PRT-14460  
-- Zestaw płytka stykowa 830 \+ przewody \+ moduł zasilający  
-- Zestaw rezystorów CF THT 1/4W opisany \- 160szt.  
-- Zasilacz impulsowy 5V/3A 15W \- wtyk DC 5,5/2,1mm  
-- Shelly Plug S Gen3 \- inteligentne gniazdko WiFi/Bluetooth/Matter z pomiarem energii \- białe
-  - Gniazdko ma możliwość pracy jako publisher MQTT  
+- Seeed Xiao ESP32-S3  WiFi/Bluetooth  Seeedstudio 113991114  
+- Moduł z buzzerem aktywnym z generatorem  SENV0005  
+- Tact Switch 12x12mm  przyciski kolorowe  4szt.  SparkFun PRT-14460  
+- Zestaw płytka stykowa 830  przewody  moduł zasilający  
+- Zestaw rezystorów CF THT 1/4W opisany  160szt.  
+- Zasilacz impulsowy 5V/3A 15W  wtyk DC 5,5/2,1mm  
+- Shelly Plug S Gen3  inteligentne gniazdko WiFi/Bluetooth/Matter z pomiarem energii  białe
+  - Gniazdko ma możliwość pracy jako publisher MQTT
 
 # Architektura rozwiązania
 
 ## Schemat połączeń płytki
 
-![](assets/connections.png)
+
 
 ## Wykorzystane usługi chmurowe
 
@@ -157,6 +157,8 @@ sequenceDiagram
     API->>CWM: Publikacja silence_buzzer
 ```
 
+
+
 # Konfiguracja czujników i warstwy sieciowej
 
 **TODO KF**
@@ -165,29 +167,29 @@ sequenceDiagram
 
 Używając aplikacji shelly konfigurujemy wtyczkę wybierając opcję dodania urządzenia:  
 
-![](assets/shelly1.png)
+
 
 Następnie w ustawieniach tej wtyczki mamy możliwość ustawienia serwera MQTT  
 
-![](assets/shelly2.png)
+
 
 ## Konfiguracja płytki i środowiska
 
 Konfiguracja zaczęła się instalacją i ustawieniem oprogramowania Arduino IDE oraz zainstalowanie w nim biblioteki esp32  
 
-![](assets/arduino_ide1.png)
+
 
 Następnie skonfigurowanie odpowiedniej płytki i portu na którym jest podłączona  
 
-![](assets/arduino_ide2.png)
+
 
 Ostatnim krokiem było napisanie odpowiedniego kodu programu jak i go wgranie.
 
 - Działający układ z przykładowym programem (naciśnięcie przycisku powoduje zmian stanu brzęczyka)  
-  - nagranie: [https://photos.app.goo.gl/jPcqguUSQTLhYxKf7](https://photos.app.goo.gl/jPcqguUSQTLhYxKf7)  
+  - nagranie: [https://photos.app.goo.gl/jPcqguUSQTLhYxKf7](https://photos.app.goo.gl/jPcqguUSQTLhYxKf7)
 - Działająca wtyczka pobiera aktualne dane
 
-![](assets/demo1.png)
+
 
 # Przesyłanie i integracja danych w chmurze
 
@@ -199,7 +201,7 @@ Treść publikacji ma postać obiektu JSON. Akceptowane jest pole `apower` z war
 
 Na odcinku między wtyczką a brokerem obowiązuje semantyka dostarczenia *at-most-once*, gdyż urządzenie Shelly nie QoS=1 w MQTT. W projekcie przyjęto, że pojedynczy utracony odczyt nie zaburza działania systemu, gdyż kolejny nadejdzie w następnym interwale raportowania.
 
-![](assets/scir-readings.drawio.png)
+
 
 ## Uwierzytelnianie urządzeń
 
@@ -216,6 +218,7 @@ Reguła IoT Core `telemetry_to_sqs` przekazuje każdą odebraną wiadomość do 
 Od momentu zapisu w kolejce obowiązuje semantyka *at-least-once*: ta sama wiadomość może zostać dostarczona wielokrotnie, lecz ponowny zapis metryki o tym samym znaczniku czasu nie zmienia wyniku analizy. Funkcja Lambda `processor` (Python 3.12) jest uruchamiana dla paczek wiadomości: do dziesięciu rekordów naraz, z maksymalnym oknem grupowania sześćdziesięciu sekund. Taki układ odzwierciedla rzeczywiste tempo napływu odczytów z wtyczki.
 
 Przepływ sterowania po opublikowaniu pomiaru wygląda następująco:
+
 - Kolejka SQS dostarcza wiadomość do funkcji `processor`. 
 - Funkcja rozpakowuje wiadomość, wydobywa pobór mocy i znacznik czasu, sortuje odczyty chronologicznie i zapisuje je metodą `PutMetricData` jako metrykę `WasherPowerReading` w przestrzeni nazw `SCIR/Washer`
 - Funkcja odtwarza bieżący stan systemu (bezczynny, pranie lub buzzer) na podstawie wcześniejszych zdarzeń zapisanych w CloudWatch i ocenia, czy należy wyemitować `cycle_start` lub `cycle_end`
@@ -230,8 +233,6 @@ Ze stanu pranie do buzzera prowadzi `cycle_end`. Emituje je `processor`, jeśli 
 
 Ze stanu buzzer powrót do bezczynnego następuje po `buzzer_off`, niezależnie od tego, czy pochodzi on z przycisku na płytce ESP32, czy z żądania HTTP. Samo wykrycie niskiego poboru mocy nie wycisza buzzera; wymaga to osobnej akcji użytkownika lub zdalnego polecenia.
 
-![](assets/scir-states.drawio.png)
-
 ## Reakcja na zakończenie prania
 
 Wykrycie zdarzenia `cycle_end` przenosi system w stan *buzzer* i uruchamia sekwencję powiadomień. Funkcja `processor` wykonuje trzy działania w ustalonej kolejności:
@@ -244,9 +245,9 @@ ESP32, subskrybujący topic sterowania, odbiera wiadomość i włącza buzzer. R
 
 Zdarzenie `cycle_start` podąża tą samą ścieżką publikacji na topic sterowania i do Discorda, lecz z akcją `cycle_started` i bez włączania buzzera. Obie emisje rejestrowane są w CloudWatch, co pozwala odtworzyć pełną historię cyklu.
 
-![](assets/scir-buzzer.drawio.png)
 
-![](assets/discord.png)
+
+
 
 ## Wyciszenie buzzera
 
@@ -268,21 +269,21 @@ Funkcja `processor` zapisuje metryki w standardowej rozdzielczości CloudWatch (
 
 Do wizualizacji zebranych danych wykorzystano usługę Amazon CloudWatch Dashboards. Interfejs webowy  łączy na jednym ekranie szeregi pomiarowe, zdarzenia cyklu prania, stan kolejki telemetrycznej, aktywność funkcji serverless oraz ostatnie wpisy dziennika.
 
-![](assets/scir-dashboard.png)
+
 
 ## Widżety i prezentowane wartości
 
 Układ składa się z czterech wykresów liniowych u góry oraz szerokiej tabeli logów u dołu.
 
-Pierwszy panel, „Lambda Invocations and Errors”, pokazuje liczbę wywołań i błędów dwóch funkcji serverless: przetwarzającej odczyty z wtyczki (`processor`) oraz obsługującej wyciszenie buzzera (`webhook`). Pojedyncze kropki na wykresie odpowiadają paczkom odczytów lub pojedynczym żądaniom HTTP; brak błędów świadczy o prawidłowym działaniu systemu.
+Pierwszy panel, ,,Lambda Invocations and Errors'', pokazuje liczbę wywołań i błędów dwóch funkcji serverless: przetwarzającej odczyty z wtyczki (`processor`) oraz obsługującej wyciszenie buzzera (`webhook`). Pojedyncze kropki na wykresie odpowiadają paczkom odczytów lub pojedynczym żądaniom HTTP; brak błędów świadczy o prawidłowym działaniu systemu.
 
-„Washer Power Reading” przedstawia pobór mocy pralki w watach na podstawie metryki `WasherPowerReading`. Na zrzucie ekranu widać typowy przebieg cyklu: faza bezczynna przy około 0,15 W, gwałtowny wzrost do około 2 kW podczas grzania wody, na koniec cyklu chwilowy wzrost użycia podczas wirowania i powrót do niskiego poboru po zakończeniu programu.
+,,Washer Power Reading'' przedstawia pobór mocy pralki w watach na podstawie metryki `WasherPowerReading`. Na zrzucie ekranu widać typowy przebieg cyklu: faza bezczynna przy około 0,15 W, gwałtowny wzrost do około 2 kW podczas grzania wody, na koniec cyklu chwilowy wzrost użycia podczas wirowania i powrót do niskiego poboru po zakończeniu programu.
 
-„Event Timeline (Numeric Codes)” wizualizuje metrykę `WasherEventCode`. Oś pionowa przyjmuje wartości od 1 do 3; poziome adnotacje oznaczają kody `1` (cycle_start, przejście do stanu prania), `2` (cycle_end, przejście do stanu buzzer) oraz `3` (buzzer_silence, powrót do bezczynności po akcji `buzzer_off`).
+,,Event Timeline (Numeric Codes)'' wizualizuje metrykę `WasherEventCode`. Oś pionowa przyjmuje wartości od 1 do 3; poziome adnotacje oznaczają kody `1` (cycle_start, przejście do stanu prania), `2` (cycle_end, przejście do stanu buzzer) oraz `3` (buzzer_silence, powrót do bezczynności po akcji `buzzer_off`).
 
-„Telemetry Queue Depth” monitoruje liczbę wiadomości oczekujących w kolejce telemetrycznej między brokerem MQTT a funkcją przetwarzającą. Wykres wskazuje, czy napływ odczytów z wtyczki jest buforowany z opóźnieniem. Stała wartość równa zero lub bardzo bliska zeru oznacza, że chmura nadąża za tempem publikacji.
+,,Telemetry Queue Depth'' monitoruje liczbę wiadomości oczekujących w kolejce telemetrycznej między brokerem MQTT a funkcją przetwarzającą. Wykres wskazuje, czy napływ odczytów z wtyczki jest buforowany z opóźnieniem. Stała wartość równa zero lub bardzo bliska zeru oznacza, że chmura nadąża za tempem publikacji.
 
-Na dole ekranu znajduje się tabela „Recent Telemetry and Events”, zbierająca logi z funkcji `processor` i `webhook`. Widok zbiera w jednym miejscu ostatnie wpisy obu funkcji i pokazuje dla każdego rekordu moment zapisu, pełną treść oraz nazwę grupy logów, z której pochodzi. Dzięki temu w jednej tabeli widać zarówno kolejne odczyty mocy, jak i zarejestrowane zdarzenia sterujące, co ułatwia debugowanie.
+Na dole ekranu znajduje się tabela ,,Recent Telemetry and Events'', zbierająca logi z funkcji `processor` i `webhook`. Widok zbiera w jednym miejscu ostatnie wpisy obu funkcji i pokazuje dla każdego rekordu moment zapisu, pełną treść oraz nazwę grupy logów, z której pochodzi. Dzięki temu w jednej tabeli widać zarówno kolejne odczyty mocy, jak i zarejestrowane zdarzenia sterujące, co ułatwia debugowanie.
 
 ## Konfiguracja i dostęp
 
@@ -292,4 +293,16 @@ Standardowy dostęp wymaga zalogowania do konta AWS z uprawnieniami do odczytu C
 
 # Napotkane problemy
 
+Debugowanie w usłudze AWS IoT Core: nawet po włączeniu logowania na poziomie `DEBUG` w całej usłudze, co powoduje zapisywanie wszystkich zdarzeń do logów w AWS CloudWatch, trudno było zidentyfikować przyczyny niektórych błędów. Przykładowo, funkcja lambda odpowiedzialna za uwierzytelnianie połączeń MQTT z gniazdka Shelly kończyła działanie sukcesem, a mimo to w logach AWS IoT Core pojawiała się wiadomość "AUTHORIZATION FAILED", bez żadnych dodatkowych informacji. Ostatecznie błąd wynikał z niepoprawnego policy zwracanego przez funkcję Lambda, ale udało się go zidentyfikować metodą prób i błędów.
+
+Gniazdko Shelly: o ile komunikacja MQTT na płytce ESP32 była stabilna i stosunkowo prosta w implementacji, o tyle gniazdko Shelly regularnie generowało co raz to nowsze problemy. Między innymi:
+
+- Po zastosowaniu nowej konfiguracji gniazdko uruchamiało się ponownie, jednak często po restarcie wyświetlało się jako *offline* w panelu webowym. Ponowne restarty rzadko pomagały. Taki stan utrzymywał się do godziny, blokując jakiekolwiek dalsze prace.
+- Działanie i możliwości konfiguracji gniazdka były kompletnie rozbieżne z dokumentacją. Panel webowy był skonstruowany inaczej, niż twierdził producent, nie było możliwości wgrania certyfikatu x509 do obsługi mTLS (stąd decyzja o przejściu na basic auth), nie było także możliwości ustawienia QoS.
+- Logi z urządzenia: po prostu ich nie było.
+
+Decyzja o wyborze gniazdka do projektu wynikała z deklaracji producenta o wbudowanym producencie MQTT, co znacznie powinno uprościć implementację ,,sprzętowej'' strony projektu. O ile producent MQTT faktycznie był obecny, o tyle jego jakość działania była daleka od oczekiwanej.
+
 # Wnioski
+
+Projekt pozwolił postawić pierwsze kroki w IoT i przekonać się z czym się wiąże praca z tego typu systemami (w szczególności z jakimi trudnościami się wiąże). Posiadaliśmy już doświadczenie z AWS, niemniej implementacja przetwarzania pomiarów umożliwiła poznanie nowego kawałka chmury, z którym większość osób nie pracuje na co dzień. Dzięki świadomej konstrukcji stacku AWSa udało się ograniczyć koszt działania systemu do $<\$1$ miesięcznie, co jest akceptowalną kwotą. Pewną wartość dodaną projektu stanowi scenariusz faktycznego zastosowania - po zakończeniu przedmiotu nie zostanie ,,schowany do szuflady'', będzie stanowił *realną odpowiedź na realny problem*.
