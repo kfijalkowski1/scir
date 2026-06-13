@@ -8,14 +8,16 @@ Autorzy: Krzysztof Fijałkowski, Tomasz Owienko
 
 Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz powiadamiania o jego zakończeniu za pomocą mikrokontrolera ESP32, inteligentnego gniazdka oraz chmury AWS.
 
+**TODO KF o psuciu się prania**
+
 # Działanie systemu
 
 - Inteligentne gniazdko mierzy zużycie energii przez pralkę i wysyła je na topic MQTT (A) w chmurze AWS  
 - Funkcja serverless pobiera wiadomości MQTT w paczkach i zapisuje je do niestandardowych metryk CloudWatch  
   - Gdy zużycie energii wzrasta, jest to rejestrowane jako rozpoczęcie cyklu prania  
-  - Gdy zużycie energii spadnie na określony czas (np. 3 minuty), jest to rejestrowane jako zakończenie cyklu prania  
-- W momencie rozpoczęcia / zakończenia cyklu, funkcja publikuje wiadomość na innym topicu (B)  
-- Wiadomość jest odbierana przez urządzenie ESP32 wyposażone w buzzer i przycisk; buzzer zaczyna wydawać dźwięk  
+  - Gdy zużycie energii utrzymuje się poniżej progu przez określony czas (2 minuty), rejestrowane jest zakończenie cyklu prania  
+- W momencie rozpoczęcia lub zakończenia cyklu funkcja publikuje wiadomość na topicu zdarzeń (B)  
+- Po zakończeniu cyklu wiadomość dociera do urządzenia ESP32 wyposażonego w buzzer i przycisk; buzzer zaczyna wydawać dźwięk  
 - Jednocześnie na telefon z systemem Android wysyłane jest powiadomienie push  
 - Naciśnięcie przycisku lub kliknięcie powiadomienia push przez użytkownika powoduje opublikowanie wiadomości na topicu (B)  
 - ESP32 odbiera wiadomość z topicu B i wyłącza buzzer  
@@ -187,21 +189,75 @@ Ostatnim krokiem było napisanie odpowiedniego kodu programu jak i go wgranie.
 
 # Przesyłanie i integracja danych w chmurze
 
-## Broker MQTT
+## Publikacja pomiarów przez wtyczkę Shelly
 
-Rolę brokera MQTT w systemie pełni usługa AWS IoT Core, zapewniająca szyfrowaną komunikację przy użyciu certyfikatów mTLS. Właściwy broker MQTT jest niewidoczny, usługa AWS IoT core zapewnia jedyne abstrakcję topiców i sama odpowiada za właściwą obsługę przekazywania wiadomości. Gniazdko ma uprawnienia wyłącznie do publikacji na zdefiniowanym topicu z pomiarami mocy układu. ESP32 ma możliwość publikowania, subskrypcji i nasłuchiwania wiadomości wyłącznie na topicu zdarzeń, służącym do obsługi i sterowania pracą buzzera.
+Inteligentne gniazdko Shelly Plug S Gen3 pełni w architekturze rolę źródła telemetrycznego. Co około trzydzieści sekund raportuje ono bieżącą moc czynną pralki, publikując ją na brokerze MQTT w usłudze AWS IoT Core. Połączenie jest szyfrowane protokołem mTLS. Wiadomości trafiają na topic `scir/prod/washer/shelly-plug/status/switch:0`, zdefiniowany w konfiguracji infrastruktury.
 
-## Zapis szeregów czasowych
+Treść publikacji ma postać obiektu JSON. Akceptowane jest pole `apower` z wartością mocy w watach, zgodnie z formatem wiadomości opisanym w dokumentacji Shelly. Reguła IoT Core wzbogaca każdą wiadomość o nazwę topicu oraz znacznik czasu przyjęcia (`ingest_ts`), co ułatwia późniejsze sortowanie odczytów w chmurze.
 
-Zgromadzone dane pomiarowe oraz wygenerowane informacje o stanie cyklu pralki przechowywane są jako zbiór szeregów czasowych w usłudze Amazon CloudWatch Metrics. Jest to poniekąd rozwiązanie kompromisowe -- usługa ta nie jest co do zasady bazą danych szeregów czasowych. Pierwotny plan zakładał wykorzystanie usługi AWS Timestream for LiveAnalytics jako taniej (serverless) bazy danych, jednak wsparcie dla niej jest ograniczone i nie jest ona dostępna na nowych kontach AWS. Dostawca sugeruje wykorzystanie AWS Timestream for InfluxDB, jednak w tej usłudze należy opłacać faktyczny serwer, na którym uruchomiona jest baza danych. AWS Cloudwatch Metrics wspiera wszystkie operacje na szeregach czasowych wymagane przez projekt i jest efektywny kosztowo, co zadecydowało o jego wyborze.
+Na odcinku między wtyczką a brokerem obowiązuje semantyka dostarczenia *at-most-once*, gdyż urządzenie Shelly nie QoS=1 w MQTT. W projekcie przyjęto, że pojedynczy utracony odczyt nie zaburza działania systemu, gdyż kolejny nadejdzie w następnym interwale raportowania.
 
-## Przetwarzanie szeregów czasowych
+![](assets/scir-readings.drawio.png)
 
-Do przetwarzania danych wykorzystano usługę AWS Lambda zapewniającą kosztowo efektywne przetwarzanie z łatwą integracją IoT Core. Utworzono dwie funkcje (Python 3.12):
+## Uwierzytelnianie urządzeń
 
-- 1. `processor` - przetwarza pomiary, wykrywa zdarzenia rozpoczęcia i zakończenia cyklu prania i reaguje na nie
-- 2. `webhook` - obsługuje żądania wyciszenia buzzera.
+Rolę brokera MQTT pełni AWS IoT Core. Właściwy serwer pozostaje niewidoczny dla urządzeń końcowych; dostępna jest wyłącznie abstrakcja topiców oraz mechanizmy autoryzacji połączeń.
 
-Pierwsza z funkcji pobiera nowe pomiary i zapisuje je jako metryki. Następnie analizuje wszystkie pomiary w zadanym oknie czasowym i wykrywa nagłe skoki poboru mocy powyżej i poniżej progu (10W). W przypadku wystąpienia skoku publikowane jest zdarzenie `cycle_start` bądź `cycle_end` w AWS Cloudwatch Metrics, dodatkowo w przypadku `cycle_end` publikowana jest wiadomość na osobnym topicu MQTT, który jest subskrybowany przez ESP32. Aby nie wywoływać funkcji z każdym odczytem dane są buforowane w kolejce AWS SQS, skąd Lambda pobiera je w paczkach.
+Wtyczka Shelly łączy się w trybie *basic auth* Zamiast certyfikatu klienta przesyła nazwę użytkownika równą identyfikatorowi urządzenia IoT oraz hasło wygenerowane podczas wdrażania stosu. Połączenie kierowane jest na dedykowaną konfigurację domeny AWS IoT Core, która nie wymaga okazania certyfiktu przez klienta (połączenie w dalszym ciągu jest szyfrowane). Każda próba nawiązania sesji przechodzi przez funkcję AWS Lambda odpowiadającą za uwierzytelnienie i autoryzację klienta. Autoryzator porównuje przekazane dane z oczekiwanymi wartościami; po pomyślnej weryfikacji zwraca politykę zezwalającą wyłącznie na połączenie oraz publikację na topic telemetryczny gniazdka. Tryb `mtls` pozostaje dostępny w konfiguracji infrastruktury.
 
-Druga z funkcji jest wywoływana w momencie otrzymania żądania HTTP nakazującego wyciszyć buzzer w usłudze AWS API Gateway. Funkcja rejestruje to zdarzenie w Cloudwatch i publikuje stosowną wiadomość na topicu subskrybowanym przez ESP32.
+Mikrokontroler ESP32 korzysta z mTLS. Posiada własny certyfikat klienta i klucz prywatny wygenerowane w IoT Core. Przypisana mu polityka zezwala na połączenie z brokerem oraz publikowanie, subskrypcję i odbiór wiadomości wyłącznie na topicu sterowania `scir/prod/washer/buzzer/events`. Urządzenie nie ma dostępu do kanału telemetrycznego gniazdka.
+
+## Buforowanie i przetwarzanie odczytów
+
+Reguła IoT Core `telemetry_to_sqs` przekazuje każdą odebraną wiadomość do kolejki Amazon SQS. Kolejka jest standardowa (usługa wspiera dwie rodzaje kolejek; `standard` i `fifo`), szyfrowana po stronie serwera, wyposażona w DLQ po pięciu nieudanych próbach odbioru (wiadomości z DLQ nie są dalej przetwarzane, ale pozwalają na debugowanie).
+
+Od momentu zapisu w kolejce obowiązuje semantyka *at-least-once*: ta sama wiadomość może zostać dostarczona wielokrotnie, lecz ponowny zapis metryki o tym samym znaczniku czasu nie zmienia wyniku analizy. Funkcja Lambda `processor` (Python 3.12) jest uruchamiana dla paczek wiadomości: do dziesięciu rekordów naraz, z maksymalnym oknem grupowania sześćdziesięciu sekund. Taki układ odzwierciedla rzeczywiste tempo napływu odczytów z wtyczki.
+
+Przepływ sterowania po opublikowaniu pomiaru wygląda następująco:
+- Kolejka SQS dostarcza wiadomość do funkcji `processor`. 
+- Funkcja rozpakowuje wiadomość, wydobywa pobór mocy i znacznik czasu, sortuje odczyty chronologicznie i zapisuje je metodą `PutMetricData` jako metrykę `WasherPowerReading` w przestrzeni nazw `SCIR/Washer`
+- Funkcja odtwarza bieżący stan systemu (bezczynny, pranie lub buzzer) na podstawie wcześniejszych zdarzeń zapisanych w CloudWatch i ocenia, czy należy wyemitować `cycle_start` lub `cycle_end`
+
+## Wykrywanie cyklu prania
+
+System utrzymuje trzy stany: bezczynny, pranie oraz buzzer. Bieżący stan nie jest zapisywany w osobnej bazie; przy każdym wywołaniu funkcji `processor` lub `webhook` odtwarza się go z historii metryki `WasherEventCode` w CloudWatch (skan ostatnich dwudziestu czterech godzin). Przejścia między stanami następują wyłącznie po opublikowaniu zdarzenia sterującego: `cycle_start` prowadzi do prania, `cycle_end` do buzzera, a `buzzer_off` (w komunikatach MQTT noszone jako `buzzer_silence` z taką akcją) z powrotem do bezczynności. Odpowiadają im kody `1`, `2` i `3` zapisywane w CloudWatch.
+
+Z bezczynnego do prania przechodzi się po emisji `cycle_start`. Funkcja `processor` generuje to zdarzenie, gdy bieżący stan to bezczynny, a w paczce odczytów pojawi się pierwsza próbka o mocy nie mniejszej niż dwa waty.
+
+Ze stanu pranie do buzzera prowadzi `cycle_end`. Emituje je `processor`, jeśli system jest w stanie prania, a przez ostatnie dwie minuty wszystkie dostępne odczyty, w paczce bieżącej i w historii CloudWatch, nie przekraczają progu dwóch watów. Fazy cyklu o podwyższonym, lecz niskim poborze (na przykład chłodzenie po wirowaniu) same w sobie nie kończą prania, gdyż przekraczają próg; sygnał `cycle_end` pojawia się zwykle dopiero po przejściu pralki w rzeczywisty spoczynek.
+
+Ze stanu buzzer powrót do bezczynnego następuje po `buzzer_off`, niezależnie od tego, czy pochodzi on z przycisku na płytce ESP32, czy z żądania HTTP. Samo wykrycie niskiego poboru mocy nie wycisza buzzera; wymaga to osobnej akcji użytkownika lub zdalnego polecenia.
+
+![](assets/scir-states.drawio.png)
+
+## Reakcja na zakończenie prania
+
+Wykrycie zdarzenia `cycle_end` przenosi system w stan *buzzer* i uruchamia sekwencję powiadomień. Funkcja `processor` wykonuje trzy działania w ustalonej kolejności:
+
+- Zapisuje w CloudWatch metrykę zdarzenia o kodzie `2`
+- Publikuje na topicu sterowania komunikat z polami `event_type`, `action` (wartość `buzzer_on`), `source`, `device_id` oraz `ts`. Publikacja odbywa się z QoS=1 MQTT. 
+- Wysyła żądanie POST na adres webhooka Discorda; URL przechowywany jest w usłudze AWS Secrets Manager. Treść powiadomienia informuje o zakończeniu cyklu prania.
+
+ESP32, subskrybujący topic sterowania, odbiera wiadomość i włącza buzzer. Równolegle użytkownik otrzymuje powiadomienie w aplikacji Discord na telefonie.
+
+Zdarzenie `cycle_start` podąża tą samą ścieżką publikacji na topic sterowania i do Discorda, lecz z akcją `cycle_started` i bez włączania buzzera. Obie emisje rejestrowane są w CloudWatch, co pozwala odtworzyć pełną historię cyklu.
+
+![](assets/scir-buzzer.drawio.png)
+
+![](assets/discord.png)
+
+## Wyciszenie buzzera
+
+Gdy system znajduje się w stanie buzzera, użytkownik może go wyciszyć na dwa sposoby. Każdy z nich kończy się emisją `buzzer_off` i powrotem do stanu bezczynnego.
+
+Pierwszy scenariusz to interakcja z płytką ESP32. Naciśnięcie przycisku powoduje natychmiastowe wyciszenie buzzera po stronie mikrokontrolera. Jednocześnie urządzenie publikuje na topicu sterowania wiadomość `buzzer_silence` z akcją `buzzer_off` i źródłem `esp32`. Reguła IoT Core `control_events_to_webhook` przekazuje to zdarzenie do funkcji `webhook`, która zapisuje je w CloudWatch pod kodem `3`. Ponowna publikacja na topic sterowania nie jest tu potrzebna, gdyż polecenie wyciszenia wyszło już bezpośrednio z urządzenia.
+
+Drugi scenariusz to żądanie zdalne przez HTTP. Dowolna aplikacja zdolna do wysłania żądania POST może wywołać endpoint `POST /v1/buzzer/silence` w API Gateway, na przykład widget na ekranie głównym telefonu uruchamiający regułę w IFTTT lub Zapier. Funkcja `webhook` weryfikuje token przekazany w nagłówku `x-scir-token`; wartość oczekiwana przechowywana jest w AWS Secrets Manager. Po pomyślnym uwierzytelnieniu funkcja publikuje wiadomość `buzzer_silence` na topic sterowania, rejestruje zdarzenie w CloudWatch, a ESP32 odbiera wiadomość i wyłącza buzzer
+
+## Przechowywanie metryk
+
+Zgromadzone dane pomiarowe oraz wygenerowane informacje o stanie cyklu pralki przechowywane są jako szeregi czasowe w usłudze Amazon CloudWatch Metrics. Jest to rozwiązanie kompromisowe: usługa ta nie jest co do zasady wyspecjalizowaną bazą szeregów czasowych, lecz spełnia wymagania projektu przy niskich kosztach eksploatacji. Pierwotny plan przewidywał AWS Timestream for LiveAnalytics, jednak usługa ta nie jest dostępna na nowych kontach AWS. Alternatywą proponowaną przez AWS jest AWS Timestream for InfluxDB, ale ten wariant nie jest rozliczany w modelu serverless i wymaga opłacania serwera, podnosząc koszty projektu do nierozsądnego poziomu.
+
+W produkcji wykorzystywane są dwie metryki niestandardowe w przestrzeni nazw `SCIR/Washer`. Metryka `WasherPowerReading` przechowuje kolejne odczyty mocy w watach z wymiarem `device_id`. Metryka `WasherEventCode` rejestruje zdarzenia dyskretne powiązane ze stanami: kod `1` odpowiada `cycle_start` (przejście do stanu "pranie"), kod `2` zdarzeniu `cycle_end` (przejście do stanu "buzzer"), kod `3` zdarzeniu `buzzer_off` (powrót do bezczynności). Na podstawie ostatniego z nich w kolejności czasowej odtwarzany jest bieżący stan systemu.
+
+Funkcja `processor` zapisuje metryki w standardowej rozdzielczości CloudWatch (sześćdziesiąt sekund). Zapytania o stan cyklu korzystają z tej samej rozdzielczości przy odczycie historii. Zgodnie z polityką retencji AWS dane o rozdzielczości większej niż 60s przechowywane są przez jedynie trzy godziny, natomiast dane w rozdzielczości sześćdziesięciu sekund i więcej mają retencję czternastu dni.
