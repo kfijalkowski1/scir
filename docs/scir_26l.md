@@ -1,14 +1,26 @@
-# System IoT monitorujący pracę pralki
-
-Sieci czujnikowe i internetu rzeczy  
-Realizacja 2026L  
-Autorzy: Krzysztof Fijałkowski, Tomasz Owienko
+---
+title: System IoT monitorujący pracę pralki
+subtitle: SCIR 2026L
+author:
+- Krzysztof Fijałkowski
+- Tomasz Owienko
+date: 13.06.2026
+documentclass: mwart
+geometry:
+- margin=1in
+fontenc: T1
+fontfamily: newcomputermodern
+fontsize: 11pt
+numbersections: true
+autoEqnLabels: true
+autoSectionLabels: true
+---
 
 # Cel projektu
 
 Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz powiadamiania o jego zakończeniu za pomocą mikrokontrolera ESP32, inteligentnego gniazdka oraz chmury AWS.
 
-**TODO KF o psuciu się prania**
+**TODO KF o psuciu się prania i realnym problemie**
 
 # Działanie systemu
 
@@ -38,7 +50,7 @@ Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz 
 
 ## Schemat połączeń płytki
 
-
+![Schemat połączeń płytki ESP32 z modułem buzzera i przyciskiem](assets/connections.png){ width=60% }
 
 ## Wykorzystane usługi chmurowe
 
@@ -167,21 +179,21 @@ sequenceDiagram
 
 Używając aplikacji shelly konfigurujemy wtyczkę wybierając opcję dodania urządzenia:  
 
-
+![Dodawanie wtyczki Shelly w aplikacji mobilnej](assets/shelly1.png){ width=30% }
 
 Następnie w ustawieniach tej wtyczki mamy możliwość ustawienia serwera MQTT  
 
-
+![Konfiguracja serwera MQTT w ustawieniach wtyczki Shelly](assets/shelly2.png){ width=30% }
 
 ## Konfiguracja płytki i środowiska
 
 Konfiguracja zaczęła się instalacją i ustawieniem oprogramowania Arduino IDE oraz zainstalowanie w nim biblioteki esp32  
 
-
+![Instalacja biblioteki ESP32 w Arduino IDE](assets/arduino_ide1.png){ width=30% }
 
 Następnie skonfigurowanie odpowiedniej płytki i portu na którym jest podłączona  
 
-
+![Wybór płytki i portu szeregowego w Arduino IDE](assets/arduino_ide2.png){ width=60% }
 
 Ostatnim krokiem było napisanie odpowiedniego kodu programu jak i go wgranie.
 
@@ -189,7 +201,7 @@ Ostatnim krokiem było napisanie odpowiedniego kodu programu jak i go wgranie.
   - nagranie: [https://photos.app.goo.gl/jPcqguUSQTLhYxKf7](https://photos.app.goo.gl/jPcqguUSQTLhYxKf7)
 - Działająca wtyczka pobiera aktualne dane
 
-
+![Odczyt bieżącego poboru mocy w aplikacji Shelly](assets/demo1.png){ width=30% }
 
 # Przesyłanie i integracja danych w chmurze
 
@@ -201,7 +213,7 @@ Treść publikacji ma postać obiektu JSON. Akceptowane jest pole `apower` z war
 
 Na odcinku między wtyczką a brokerem obowiązuje semantyka dostarczenia *at-most-once*, gdyż urządzenie Shelly nie QoS=1 w MQTT. W projekcie przyjęto, że pojedynczy utracony odczyt nie zaburza działania systemu, gdyż kolejny nadejdzie w następnym interwale raportowania.
 
-
+![Przepływ publikacji odczytów mocy z wtyczki do chmury](assets/scir-readings.drawio.png){ width=100% }
 
 ## Uwierzytelnianie urządzeń
 
@@ -233,6 +245,8 @@ Ze stanu pranie do buzzera prowadzi `cycle_end`. Emituje je `processor`, jeśli 
 
 Ze stanu buzzer powrót do bezczynnego następuje po `buzzer_off`, niezależnie od tego, czy pochodzi on z przycisku na płytce ESP32, czy z żądania HTTP. Samo wykrycie niskiego poboru mocy nie wycisza buzzera; wymaga to osobnej akcji użytkownika lub zdalnego polecenia.
 
+![Diagram stanów systemu: bezczynny, pranie i buzzer](assets/scir-states.drawio.png){ width=70% }
+
 ## Reakcja na zakończenie prania
 
 Wykrycie zdarzenia `cycle_end` przenosi system w stan *buzzer* i uruchamia sekwencję powiadomień. Funkcja `processor` wykonuje trzy działania w ustalonej kolejności:
@@ -245,9 +259,9 @@ ESP32, subskrybujący topic sterowania, odbiera wiadomość i włącza buzzer. R
 
 Zdarzenie `cycle_start` podąża tą samą ścieżką publikacji na topic sterowania i do Discorda, lecz z akcją `cycle_started` i bez włączania buzzera. Obie emisje rejestrowane są w CloudWatch, co pozwala odtworzyć pełną historię cyklu.
 
+![Przepływ sterowania po wykryciu zakończenia prania](assets/scir-buzzer.drawio.png){ width=100% }
 
-
-
+![Powiadomienie o zakończeniu cyklu prania w aplikacji Discord](assets/discord.png){ width=50% }
 
 ## Wyciszenie buzzera
 
@@ -269,7 +283,7 @@ Funkcja `processor` zapisuje metryki w standardowej rozdzielczości CloudWatch (
 
 Do wizualizacji zebranych danych wykorzystano usługę Amazon CloudWatch Dashboards. Interfejs webowy  łączy na jednym ekranie szeregi pomiarowe, zdarzenia cyklu prania, stan kolejki telemetrycznej, aktywność funkcji serverless oraz ostatnie wpisy dziennika.
 
-
+![Dashboard w Amazon CloudWatch](assets/scir-dashboard.png){ width=100% }
 
 ## Widżety i prezentowane wartości
 
