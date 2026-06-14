@@ -173,32 +173,128 @@ sequenceDiagram
 
 # Konfiguracja czujników i warstwy sieciowej
 
-**TODO KF**
+Komunikacja z chmurą po stronie urządzeń jest zabezpieczona mTLS (MQTT po TLS, port 8883). Zarówno gniazdko Shelly, jak i ESP32 uwierzytelniają się certyfikatem X.509 wystawionym przez AWS IoT Core, a po stronie urządzenia weryfikują serwer korzeniowym certyfikatem Amazon (`AmazonRootCA1.pem`).
 
-## Konfiguracja wtyczki
+## Pobranie materiału kryptograficznego
 
-Używając aplikacji shelly konfigurujemy wtyczkę wybierając opcję dodania urządzenia:  
+Certyfikaty są generowane jednorazowo przez Terragrunt w module [`cloud/modules/iot-core`](../cloud/modules/iot-core/main.tf) i udostępniane jako wrażliwe outputy.
+
+```bash
+cd cloud/environments/prod/iot
+
+AWS_PROFILE=terraform terragrunt output -raw iot_data_endpoint     # host MQTT
+AWS_PROFILE=terraform terragrunt output -raw esp_certificate_pem    # cert ESP32
+AWS_PROFILE=terraform terragrunt output -raw esp_private_key        # klucz ESP32
+AWS_PROFILE=terraform terragrunt output -raw shelly_certificate_pem # cert Shelly
+AWS_PROFILE=terraform terragrunt output -raw shelly_private_key     # klucz Shelly
+
+curl -sSf https://www.amazontrust.com/repository/AmazonRootCA1.pem
+```
+
+
+## Konfiguracja wtyczki Shelly Plug S Gen3
+
+Używając aplikacji Shelly konfigurujemy wtyczkę wybierając opcję dodania urządzenia:  
 
 ![Dodawanie wtyczki Shelly w aplikacji mobilnej](assets/shelly1.png){ width=30% }
 
-Następnie w ustawieniach tej wtyczki mamy możliwość ustawienia serwera MQTT  
+W ustawieniach wtyczki (sekcja MQTT) wprowadzamy parametry połączenia z AWS IoT Core:
 
 ![Konfiguracja serwera MQTT w ustawieniach wtyczki Shelly](assets/shelly2.png){ width=30% }
 
+| Parametr | Wartość |
+| -------- | ------- |
+| Enable MQTT | włączone |
+| Server | `<iot_data_endpoint>:8883` (wartość z `terragrunt output -raw iot_data_endpoint`) |
+| Client ID | `scir-prod-shelly-plug` (musi być identyczny z nazwą IoT Thing) |
+| MQTT prefix | `scir/prod/washer/shelly-plug/status/switch:0` |
+| Enable SSL / TLS | włączone |
+| CA certificate | `*` (cert AWS-a był już dostępny na wtyczce więc nie było wymagania aby wgrywać go ręcznie) |
+| Username | taki sam jak client id |
+| Password | Wyjęte z sekretów terragrunt |
+
+Po zapisaniu i restarcie wtyczki w panelu CloudWatch (dashboard z modułu [`cloud/modules/observability`](../cloud/modules/observability/main.tf)) powinny pojawić się punkty metryki `SCIR/Washer / WasherPowerReading`.
+
 ## Konfiguracja płytki i środowiska
 
-Konfiguracja zaczęła się instalacją i ustawieniem oprogramowania Arduino IDE oraz zainstalowanie w nim biblioteki esp32  
+Konfiguracja zaczęła się instalacją i ustawieniem oprogramowania Arduino IDE oraz zainstalowanie w nim biblioteki esp32:
 
 ![Instalacja biblioteki ESP32 w Arduino IDE](assets/arduino_ide1.png){ width=30% }
 
-Następnie skonfigurowanie odpowiedniej płytki i portu na którym jest podłączona  
+Następnie skonfigurowanie odpowiedniej płytki (`XIAO_ESP32S3`) i portu na którym jest podłączona:
 
 ![Wybór płytki i portu szeregowego w Arduino IDE](assets/arduino_ide2.png){ width=60% }
 
-Ostatnim krokiem było napisanie odpowiedniego kodu programu jak i go wgranie.
+Firmware znajduje się w katalogu [`device/esp32-buzzer/`](../device/esp32-buzzer/) i składa się z trzech plików: szkicu Arduino `esp32-buzzer.ino`, szablonu `secrets.h.example` oraz `README.md` z procedurą buildu.
 
-- Działający układ z przykładowym programem (naciśnięcie przycisku powoduje zmian stanu brzęczyka)  
-  - nagranie: [https://photos.app.goo.gl/jPcqguUSQTLhYxKf7](https://photos.app.goo.gl/jPcqguUSQTLhYxKf7)
+### Wymagane biblioteki Arduino
+
+| Biblioteka | Wersja | Źródło |
+| ---------- | ------ | ------ |
+| `esp32` (board package, Espressif Systems) | >= 3.0 | Boards Manager — dostarcza `WiFi.h` i `WiFiClientSecure.h` |
+| `PubSubClient` (Nick O'Leary) | >= 2.8 | Library Manager — klient MQTT |
+| `ArduinoJson` (Benoit Blanchon) | >= 7.0 | Library Manager — serializacja JSON |
+
+### Mapowanie pinów (Xiao ESP32-S3)
+
+| Element | Pin | Uwagi |
+| ------- | --- | ----- |
+| Buzzer (SENV0005, aktywny) | `D5` | Stan wysoki = dźwięk włączony |
+| Tact Switch 12×12 mm | `D6` |  |
+| Zasilanie modułów | `5V` / `GND` | Zasilacz impulsowy 5 V / 3 A wg [konfiguracji projektu](#wybrane-czujniki) |
+
+Domyślne pinout można zmienić edytując bloki `#ifndef` na początku `esp32-buzzer.ino`.
+
+### Generowanie `secrets.h`
+
+`device/esp32-buzzer/secrets.h` tworzymy go lokalnie z szablonu:
+
+```bash
+cp device/esp32-buzzer/secrets.h.example device/esp32-buzzer/secrets.h
+# uzupełniamy WIFI_SSID, WIFI_PASSWORD, MQTT_HOST oraz trzy bloki PEM:
+#   AWS_ROOT_CA_PEM        ← AmazonRootCA1.pem
+#   DEVICE_CERT_PEM        ← terragrunt output -raw esp_certificate_pem
+#   DEVICE_PRIVATE_KEY_PEM ← terragrunt output -raw esp_private_key
+```
+
+`MQTT_CLIENT_ID` pozostaje `scir-prod-esp32-buzzer` — z tego samego powodu co Client ID Shelly (polityka `iot:Connect`).
+
+### Maszyna stanów firmware
+
+Po uruchomieniu szkic:
+
+1. Łączy się z WiFi (`WiFi.h`).
+2. Synchronizuje zegar z NTP — `WiFiClientSecure`.
+3. Ładuje CA, cert klienta i klucz do `WiFiClientSecure`, łączy się z brokerem AWS IoT Core na porcie 8883.
+4. Subskrybuje `scir/prod/washer/buzzer/events` z QoS 1.
+
+Reakcja na wiadomości i wejście użytkownika:
+
+| Źródło | Warunek | Akcja firmware |
+| ------ | ------- | -------------- |
+| MQTT | `event_type=="cycle_end"` lub `action=="buzzer_on"` | Buzzer ON |
+| MQTT | `event_type=="buzzer_silence"` lub `action=="buzzer_off"` | Buzzer OFF |
+| MQTT | `event_type=="cycle_start"` | Log na `Serial`, brak zmian stanu |
+| Przycisk (debounce 50 ms) | Zbocze opadające (active-low) | Lokalnie wyłączenie buzzera + publikacja `buzzer_silence` z `source: "esp32"` |
+
+Publikowany payload (QoS 1, retain=false):
+
+```json
+{
+  "event_type": "buzzer_silence",
+  "action": "buzzer_off",
+  "source": "esp32",
+  "device_id": "washing-machine",
+  "ts": 1735689600000
+}
+```
+
+Format jest zgodny ze schematem `Control/events topic payload` z [`cloud/README.md`](../cloud/README.md) oraz z formatem produkowanym przez Lambdę `webhook` w [`cloud/modules/lambda-webhook/src/handler.py`](../cloud/modules/lambda-webhook/src/handler.py), dzięki czemu wyciszenie pochodzące z aplikacji mobilnej (przez API Gateway) jest dla ESP32 nieodróżnialne od zdarzenia własnego.
+
+## Demonstracja sprzętowa
+
+- Działający układ z przykładowym programem (naciśnięcie przycisku powoduje zmianę stanu brzęczyka)  
+  - nagranie: [https://photos.app.goo.gl/jPcqguUSQTLhYxKf7](https://photos.app.goo.gl/jPcqguUSQTLhYxKf7)  
 - Działająca wtyczka pobiera aktualne dane
 
 ![Odczyt bieżącego poboru mocy w aplikacji Shelly](assets/demo1.png){ width=30% }

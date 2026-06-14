@@ -261,3 +261,6 @@ activation.png
 *.crt
 *.pem
 *.key
+
+# Firmware-local secrets (WiFi + IoT certs baked into the sketch)
+device/esp32-buzzer/secrets.h
