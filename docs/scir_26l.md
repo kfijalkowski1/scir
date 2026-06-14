@@ -20,8 +20,6 @@ autoSectionLabels: true
 
 Celem projektu jest implementacja systemu monitorowania cyklu pracy pralki oraz powiadamiania o jego zakończeniu za pomocą mikrokontrolera ESP32, inteligentnego gniazdka oraz chmury AWS.
 
-**TODO KF o psuciu się prania i realnym problemie**
-
 # Działanie systemu
 
 - Inteligentne gniazdko mierzy zużycie energii przez pralkę i wysyła je na topic MQTT (A) w chmurze AWS  
@@ -289,7 +287,7 @@ Publikowany payload (QoS 1, retain=false):
 }
 ```
 
-Format jest zgodny ze schematem `Control/events topic payload` z [`cloud/README.md`](../cloud/README.md) oraz z formatem produkowanym przez Lambdę `webhook` w [`cloud/modules/lambda-webhook/src/handler.py`](../cloud/modules/lambda-webhook/src/handler.py), dzięki czemu wyciszenie pochodzące z aplikacji mobilnej (przez API Gateway) jest dla ESP32 nieodróżnialne od zdarzenia własnego.
+Format jest zgodny z formatem produkowanym przez Lambdę `webhook`, dzięki czemu wyciszenie pochodzące z aplikacji mobilnej (przez API Gateway) jest dla ESP32 nieodróżnialne od zdarzenia własnego.
 
 ## Demonstracja sprzętowa
 
