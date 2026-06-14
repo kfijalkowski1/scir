@@ -77,25 +77,25 @@ flowchart TD
         iot-readings[AWS IoT Core
         Broker MQTT
         Topic z odczytami]
-        iot-readings@{ icon: "aws:arch-aws-iot-core" }
+        iot-readings
         iot-events[AWS IoT Core
         Broker MQTT
         Topic ze zdarzeniami]
-        iot-events@{ icon: "aws:arch-aws-iot-core" }
+        iot-events
         lambda_proc[AWS Lambda
         Przetwarzanie odczytów]
-        lambda_proc@{ icon: "aws:arch-aws-lambda" }
+        lambda_proc
         metrics[(Amazon CloudWatch Metrics
         Metryki)]
-        metrics@{ icon: "aws:arch-amazon-cloudwatch" }
+        metrics
         lambda_webhook[AWS Lambda
         Obsługa żądań wyciszenie buzzera]
-        lambda_webhook@{ icon: "aws:arch-aws-lambda" }
+        lambda_webhook
         api[AWS API Gateway]
-        api@{ icon: "aws:arch-amazon-api-gateway" }
+        api
         cloudwatch[Amazon CloudWatch
         Wizualizacja danych]
-        cloudwatch@{ icon: "aws:arch-amazon-cloudwatch" }
+        cloudwatch
     end
     
     subgraph APKA [Urządzenie mobilne]
@@ -171,8 +171,6 @@ sequenceDiagram
 
 # Konfiguracja czujników i warstwy sieciowej
 
-Komunikacja z chmurą po stronie urządzeń jest zabezpieczona mTLS (MQTT po TLS, port 8883). Zarówno gniazdko Shelly, jak i ESP32 uwierzytelniają się certyfikatem X.509 wystawionym przez AWS IoT Core, a po stronie urządzenia weryfikują serwer korzeniowym certyfikatem Amazon (`AmazonRootCA1.pem`).
-
 ## Pobranie materiału kryptograficznego
 
 Certyfikaty są generowane jednorazowo przez Terragrunt w module [`cloud/modules/iot-core`](../cloud/modules/iot-core/main.tf) i udostępniane jako wrażliwe outputy.
@@ -201,7 +199,7 @@ W ustawieniach wtyczki (sekcja MQTT) wprowadzamy parametry połączenia z AWS Io
 ![Konfiguracja serwera MQTT w ustawieniach wtyczki Shelly](assets/shelly2.png){ width=30% }
 
 | Parametr | Wartość |
-| -------- | ------- |
+| -------- | --------------------------- |
 | Enable MQTT | włączone |
 | Server | `<iot_data_endpoint>:8883` (wartość z `terragrunt output -raw iot_data_endpoint`) |
 | Client ID | `scir-prod-shelly-plug` (musi być identyczny z nazwą IoT Thing) |

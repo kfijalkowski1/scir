@@ -71,19 +71,19 @@ variable "api_silence_endpoint" {
 variable "start_power_threshold" {
   description = "Power threshold (W) indicating cycle start"
   type        = number
-  default     = 10
+  default     = 2
 }
 
 variable "end_power_threshold" {
   description = "Power threshold (W) for low-power end detection"
   type        = number
-  default     = 10
+  default     = 2
 }
 
 variable "low_power_window_seconds" {
   description = "Low-power duration to mark cycle end"
   type        = number
-  default     = 30
+  default     = 120
 }
 
 variable "device_id" {

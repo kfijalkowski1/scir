@@ -214,8 +214,8 @@ mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" \
 
 To trigger cycle detection with defaults:
 
-- publish high power (>= `10W`) to trigger `cycle_start`
-- then keep power low (<= `10W`) for ~`30s` to allow `cycle_end`
+- publish high power (>= `2W`) to trigger `cycle_start`
+- then keep power low (<= `2W`) for ~`2 min` to allow `cycle_end`
 
 These are current processor defaults (`START_POWER_THRESHOLD`, `END_POWER_THRESHOLD`, `LOW_POWER_WINDOW_SECONDS`) and may be tuned in future deployments.
 They are defined in `cloud/modules/lambda-processor/src/handler.py` and set through Lambda environment variables from `cloud/modules/lambda-processor/main.tf`.
